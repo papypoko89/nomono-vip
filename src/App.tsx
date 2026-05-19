@@ -295,10 +295,44 @@ function App() {
     store.sync.sheetEndpoint ? 'Google Sheet siap disambungkan.' : 'Mode lokal.',
   );
   const skipAutoSyncRef = useRef(false);
+  const remoteReadyRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }, [store]);
+
+  useEffect(() => {
+    const endpoint = store.sync.sheetEndpoint.trim();
+    if (!endpoint) {
+      remoteReadyRef.current = true;
+      return;
+    }
+
+    let cancelled = false;
+    setSyncStatus('Memuat database dari Google Sheet...');
+
+    readSheetStore(endpoint)
+      .then((remote) => {
+        if (cancelled) return;
+        remoteReadyRef.current = true;
+        skipAutoSyncRef.current = true;
+        setStore((current) => ({
+          ...remote,
+          sync: { ...current.sync, lastSyncedAt: new Date().toISOString() },
+        }));
+        setForm(makeForm(remote.items, remote.staff));
+        setSyncStatus('Database Google Sheet sudah dimuat.');
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        remoteReadyRef.current = false;
+        setSyncStatus(error instanceof Error ? error.message : 'Gagal memuat Google Sheet. Mode lokal tetap aktif.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (skipAutoSyncRef.current) {
@@ -306,6 +340,10 @@ function App() {
       return;
     }
     if (!store.sync.autoSync || !store.sync.sheetEndpoint.trim()) return;
+    if (!remoteReadyRef.current) {
+      setSyncStatus('Auto-sync menunggu database Google Sheet dimuat.');
+      return;
+    }
 
     setSyncStatus('Menunggu auto-sync...');
     const timer = window.setTimeout(async () => {
@@ -436,6 +474,7 @@ function App() {
     setSyncStatus('Mengirim data lokal ke Google Sheet...');
     try {
       await writeSheetStore(endpoint, store);
+      remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
       setStore((current) => ({
         ...current,
@@ -456,6 +495,7 @@ function App() {
     setSyncStatus('Menarik data dari Google Sheet...');
     try {
       const remote = await readSheetStore(endpoint);
+      remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
       setStore((current) => ({
         ...remote,
