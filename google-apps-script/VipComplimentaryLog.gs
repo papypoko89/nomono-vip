@@ -185,7 +185,7 @@ function writeStore_(data) {
 function readObjects_(sheetName) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return [];
-  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  const values = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getDisplayValues();
   const headers = values.shift();
   return values
     .filter(function (row) {
@@ -205,6 +205,7 @@ function readObjects_(sheetName) {
 function writeRows_(sheetName, headers, rows) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   sheet.clearContents();
+  sheet.getRange(1, 1, Math.max(rows.length + 1, 2), headers.length).setNumberFormat('@');
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
   if (rows.length) {

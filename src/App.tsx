@@ -146,6 +146,44 @@ const niceDate = (value: string) =>
 
 const monthKey = (date: string) => date.slice(0, 7);
 
+const normalizeDateValue = (value: unknown) => {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (value instanceof Date) {
+    const date = new Date(value);
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 10);
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    parsed.setMinutes(parsed.getMinutes() - parsed.getTimezoneOffset());
+    return parsed.toISOString().slice(0, 10);
+  }
+  return raw;
+};
+
+const normalizeTimeValue = (value: unknown) => {
+  if (typeof value === 'string' && /^\d{2}:\d{2}$/.test(value)) return value;
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const fullTime = raw.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (fullTime) {
+    return `${String(Number(fullTime[1])).padStart(2, '0')}:${fullTime[2]}`;
+  }
+
+  const ampm = raw.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
+  if (ampm) {
+    let hour = Number(ampm[1]);
+    if (ampm[3].toUpperCase() === 'PM' && hour < 12) hour += 12;
+    if (ampm[3].toUpperCase() === 'AM' && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, '0')}:${ampm[2]}`;
+  }
+
+  return raw;
+};
+
 const emptyStore = (): AppStore => ({
   items: DEFAULT_ITEMS,
   staff: DEFAULT_STAFF,
@@ -204,7 +242,9 @@ function normalizeStore(value: unknown): AppStore {
     sessions: Array.isArray(parsed.sessions)
       ? parsed.sessions.map((session) => ({
           ...session,
-          endTime: session.endTime || addHours(session.startTime || '00:00', 1),
+          date: normalizeDateValue(session.date),
+          startTime: normalizeTimeValue(session.startTime),
+          endTime: normalizeTimeValue(session.endTime) || addHours(normalizeTimeValue(session.startTime) || '00:00', 1),
           items: Array.isArray(session.items) ? session.items.map(calculateLine) : [],
         }))
       : [],
