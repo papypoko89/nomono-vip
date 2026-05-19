@@ -99,7 +99,7 @@ const DEFAULT_SHEET_ENDPOINT =
   'https://script.google.com/macros/s/AKfycbzCWhlBw9OFcUjhcqHj0_A5LgW15cdGk4ss4C3KCl6v0CGHSM_RQP_gv7mlzo5IBAwkgA/exec';
 const DEFAULT_SYNC: SyncSettings = {
   sheetEndpoint: DEFAULT_SHEET_ENDPOINT,
-  autoSync: false,
+  autoSync: true,
 };
 const BOOKING_TIME_OPTIONS = Array.from({ length: 25 }, (_, hour) => {
   const value = `${String(hour).padStart(2, '0')}:00`;
@@ -211,6 +211,7 @@ function normalizeStore(value: unknown): AppStore {
     sync: {
       ...DEFAULT_SYNC,
       ...(parsed.sync && typeof parsed.sync === 'object' ? parsed.sync : {}),
+      autoSync: true,
     },
   };
 }
@@ -296,6 +297,7 @@ function App() {
   );
   const skipAutoSyncRef = useRef(false);
   const remoteReadyRef = useRef(false);
+  const pendingLocalSyncRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
@@ -303,6 +305,7 @@ function App() {
 
   useEffect(() => {
     const endpoint = store.sync.sheetEndpoint.trim();
+    remoteReadyRef.current = false;
     if (!endpoint) {
       remoteReadyRef.current = true;
       return;
@@ -315,6 +318,7 @@ function App() {
       .then((remote) => {
         if (cancelled) return;
         remoteReadyRef.current = true;
+        pendingLocalSyncRef.current = false;
         skipAutoSyncRef.current = true;
         setStore((current) => ({
           ...remote,
@@ -332,7 +336,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [store.sync.sheetEndpoint]);
 
   useEffect(() => {
     if (skipAutoSyncRef.current) {
@@ -340,6 +344,7 @@ function App() {
       return;
     }
     if (!store.sync.autoSync || !store.sync.sheetEndpoint.trim()) return;
+    if (!pendingLocalSyncRef.current) return;
     if (!remoteReadyRef.current) {
       setSyncStatus('Auto-sync menunggu database Google Sheet dimuat.');
       return;
@@ -349,6 +354,7 @@ function App() {
     const timer = window.setTimeout(async () => {
       try {
         await writeSheetStore(store.sync.sheetEndpoint.trim(), store);
+        pendingLocalSyncRef.current = false;
         setSyncStatus(`Auto-sync tersimpan ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`);
       } catch (error) {
         setSyncStatus(error instanceof Error ? error.message : 'Auto-sync gagal.');
@@ -371,6 +377,11 @@ function App() {
   const totals = useMemo(() => getSessionTotals(form.items), [form.items]);
   const validationErrors = useMemo(() => validateForm(form), [form]);
 
+  const updateStoreFromLocal = (updater: React.SetStateAction<AppStore>) => {
+    pendingLocalSyncRef.current = true;
+    setStore(updater);
+  };
+
   const saveSession = (status: SessionStatus) => {
     const errors = validateForm(form);
     if (errors.length) return;
@@ -386,7 +397,7 @@ function App() {
       items: cleanedItems,
     };
 
-    setStore((current) => ({
+    updateStoreFromLocal((current) => ({
       ...current,
       sessions: editingId
         ? current.sessions.map((session) => (session.id === editingId ? payload : session))
@@ -415,7 +426,7 @@ function App() {
 
   const deleteSession = (sessionId: string) => {
     if (!window.confirm('Hapus log sesi ini?')) return;
-    setStore((current) => ({
+    updateStoreFromLocal((current) => ({
       ...current,
       sessions: current.sessions.filter((session) => session.id !== sessionId),
     }));
@@ -440,7 +451,7 @@ function App() {
   };
 
   const toggleMajooInLog = (sessionId: string, lineId: string) => {
-    setStore((current) => ({
+    updateStoreFromLocal((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
         session.id === sessionId
@@ -462,7 +473,8 @@ function App() {
   };
 
   const updateSync = (sync: SyncSettings) => {
-    setStore((current) => ({ ...current, sync }));
+    pendingLocalSyncRef.current = false;
+    setStore((current) => ({ ...current, sync: { ...sync, autoSync: true } }));
   };
 
   const pushToSheet = async () => {
@@ -475,6 +487,7 @@ function App() {
     try {
       await writeSheetStore(endpoint, store);
       remoteReadyRef.current = true;
+      pendingLocalSyncRef.current = false;
       skipAutoSyncRef.current = true;
       setStore((current) => ({
         ...current,
@@ -496,6 +509,7 @@ function App() {
     try {
       const remote = await readSheetStore(endpoint);
       remoteReadyRef.current = true;
+      pendingLocalSyncRef.current = false;
       skipAutoSyncRef.current = true;
       setStore((current) => ({
         ...remote,
@@ -553,8 +567,8 @@ function App() {
             staff={store.staff}
             sync={store.sync}
             syncStatus={syncStatus}
-            setItems={(items) => setStore((current) => ({ ...current, items }))}
-            setStaff={(staff) => setStore((current) => ({ ...current, staff }))}
+            setItems={(items) => updateStoreFromLocal((current) => ({ ...current, items }))}
+            setStaff={(staff) => updateStoreFromLocal((current) => ({ ...current, staff }))}
             setSync={updateSync}
             onPushToSheet={pushToSheet}
             onPullFromSheet={pullFromSheet}
@@ -1006,10 +1020,7 @@ function MasterScreen({
           />
         </Field>
         <div className="syncControls">
-          <label className="syncToggle">
-            <Toggle checked={sync.autoSync} onChange={() => setSync({ ...sync, autoSync: !sync.autoSync })} />
-            <span>Auto-sync</span>
-          </label>
+          <div className="syncAlwaysOn">Auto-sync aktif</div>
           <div className="syncButtons">
             <button className="secondaryBtn" onClick={onPullFromSheet}>
               <Download size={16} /> Tarik
