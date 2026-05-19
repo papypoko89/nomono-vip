@@ -1,0 +1,379 @@
+# VIP Complimentary Log - ChatGPT Handoff
+
+## Ringkasan App
+
+Nama app: **VIP Complimentary Log**
+
+App ini adalah web app internal untuk staff Nomono Padel mencatat penggunaan minuman/snack complimentary di VIP room per sesi booking.
+
+App dibuat mobile-first dengan visual style Nomono:
+
+- Font: `DM Mono`
+- Primary green: `#003820`
+- Accent gold: `#C39A4B`
+- Cream: `#E0DBBC`
+- Background: `#FAFAF7`
+- Text: `#231F20`
+
+Production URL:
+
+```txt
+https://nomono-vip.vercel.app
+```
+
+GitHub repo:
+
+```txt
+https://github.com/papypoko89/nomono-vip
+```
+
+## Tech Stack
+
+- React
+- Vite
+- TypeScript
+- CSS custom styling
+- Vercel deployment
+- GitHub source control
+- Google Sheet as database
+- Google Apps Script as API bridge
+- localStorage as local cache/fallback
+
+## Database Architecture
+
+App berjalan di Vercel, tapi data utama disimpan di Google Sheet.
+
+Flow:
+
+```txt
+User buka app Vercel
+  -> app membaca data dari Google Apps Script Web App
+  -> Apps Script membaca Google Sheet
+  -> data muncul di app
+  -> user input/update data
+  -> app auto-sync ke Apps Script
+  -> Apps Script update Google Sheet
+```
+
+Google Apps Script endpoint:
+
+```txt
+https://script.google.com/macros/s/AKfycbzCWhlBw9OFcUjhcqHj0_A5LgW15cdGk4ss4C3KCl6v0CGHSM_RQP_gv7mlzo5IBAwkgA/exec
+```
+
+Important sync behavior:
+
+- Auto-sync wajib aktif secara default.
+- Saat app dibuka di HP/browser baru, app harus menarik data dari Google Sheet lebih dulu.
+- App tidak boleh overwrite Google Sheet saat first load.
+- App hanya push ke Google Sheet setelah ada perubahan lokal: input sesi, edit master data, hapus log, checklist Majoo, dll.
+- Tombol `Tarik` tetap ada untuk manual pull dari Sheet.
+- Tombol `Kirim` tetap ada untuk manual push ke Sheet.
+
+## Google Sheet Tabs
+
+Apps Script membuat/mengelola sheet berikut:
+
+```txt
+Items
+Staff
+Sessions
+SessionItems
+```
+
+### Items
+
+Kolom:
+
+```txt
+id
+name
+category
+hpp
+defaultQty
+active
+```
+
+Default item:
+
+```txt
+Aqua 600ml
+Pocari Sweat 500ml
+Mizone 500ml
+Coconut RTD
+```
+
+### Staff
+
+Kolom:
+
+```txt
+id
+name
+active
+```
+
+Default staff:
+
+```txt
+Staff 1
+Staff 2
+Supervisor
+```
+
+### Sessions
+
+Kolom:
+
+```txt
+id
+date
+startTime
+endTime
+bookingName
+room
+staffName
+status
+notes
+createdAt
+updatedAt
+```
+
+`room` tidak ditampilkan di UI input, tapi tetap otomatis disimpan sebagai:
+
+```txt
+VIP Room
+```
+
+### SessionItems
+
+Kolom:
+
+```txt
+sessionId
+id
+itemId
+itemName
+hpp
+preparedQty
+sealedLeftQty
+usedQty
+returnToStockQty
+totalCost
+majooInputDone
+```
+
+## Main Formula
+
+```txt
+usedQty = preparedQty - sealedLeftQty
+returnToStockQty = sealedLeftQty
+totalCost = usedQty * hpp
+```
+
+Validation:
+
+- `sealedLeftQty` tidak boleh lebih besar dari `preparedQty`
+- qty tidak boleh minus
+- qty harus angka bulat
+- `endTime` harus lebih besar dari `startTime`
+
+## Current UX Decisions
+
+### Input
+
+Staff input:
+
+- Tanggal
+- Jam mulai
+- Jam selesai
+- Nama booking/tamu
+- Staff
+- Catatan
+- Multi item complimentary
+- Qty disiapkan
+- Qty sisa segel
+- Checkbox Majoo per item
+
+Tidak ditampilkan di Input:
+
+- Biaya
+- Room text box
+- Simpan draft
+
+Tombol utama:
+
+```txt
+Complete
+```
+
+### Jam Booking
+
+Jam mulai dan jam selesai menggunakan dropdown jam bulat:
+
+```txt
+00.00, 01.00, 02.00, ... 23.00, 24.00
+```
+
+Contoh booking:
+
+```txt
+07.00 - 10.00
+```
+
+### Log Harian
+
+Menampilkan session log dan item lines.
+
+Filter:
+
+- Hari ini
+- Bulan ini
+- Custom
+- Belum Majoo
+
+Export:
+
+- CSV
+
+### Rekap
+
+Owner melihat biaya hanya di Rekap dan Log, bukan di Input staff.
+
+Rekap berisi:
+
+- Total sesi VIP
+- Total biaya complimentary
+- Total qty terpakai
+- Jumlah item belum Majoo
+- Item paling sering terpakai
+- Rata-rata Aqua per sesi
+- Rekap per item
+
+### Master Data
+
+Master Data berisi:
+
+- Google Sheet Sync panel
+- Master item
+- Master staff
+
+Google Sheet Sync sekarang menampilkan status:
+
+```txt
+Auto-sync aktif
+Database Google Sheet sudah dimuat.
+Sync terakhir: ...
+```
+
+## Important Bug Fixes Already Applied
+
+### First-load overwrite prevention
+
+Problem:
+
+HP/browser baru bisa saja punya localStorage kosong/default, lalu auto-sync push ke Sheet dan menghapus data remote.
+
+Fix:
+
+App wajib pull dari Google Sheet lebih dulu. Auto-sync tidak push sebelum remote data berhasil dimuat.
+
+### Google Sheet date/time normalization
+
+Problem:
+
+Google Sheet mengembalikan tanggal/jam sebagai string seperti:
+
+```txt
+Wed May 20 2026 00:00:00 GMT+0700
+Sat Dec 30 1899 01:00:00 GMT+0707
+```
+
+Sedangkan app butuh:
+
+```txt
+2026-05-20
+01:00
+```
+
+Fix:
+
+App menormalisasi `date`, `startTime`, dan `endTime` saat membaca data dari Google Sheet.
+
+Apps Script juga diupdate agar membaca dengan `getDisplayValues()` dan menulis sheet sebagai text format.
+
+## Local Development
+
+Folder project:
+
+```txt
+E:\File Dika\Apps AI\Nomono VIP
+```
+
+Run local:
+
+```bash
+npm install
+npm run dev
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+Local URL:
+
+```txt
+http://127.0.0.1:5173
+```
+
+Deploy production:
+
+```bash
+npx vercel deploy --prod --yes
+```
+
+Push GitHub:
+
+```bash
+git add .
+git commit -m "message"
+git push origin main
+```
+
+## Files of Interest
+
+```txt
+src/App.tsx
+src/styles.css
+google-apps-script/VipComplimentaryLog.gs
+README.md
+package.json
+```
+
+## Recent Commit History
+
+Important commits:
+
+```txt
+60fb2b0 Build VIP complimentary log app
+cef9945 Ignore Vercel local metadata
+a774062 Protect Google Sheet sync on first load
+144887b Make Google Sheet sync mandatory
+e42180d Normalize Google Sheet date and time values
+```
+
+## Guidance for Future ChatGPT/Codex Work
+
+When modifying this app:
+
+- Keep UI mobile-first.
+- Do not show cost on staff Input screen.
+- Keep Google Sheet as source of truth.
+- Never push default empty local data to Google Sheet on first load.
+- Preserve Nomono visual system.
+- Keep staff workflow fast: one session input should take under 30 seconds.
+- Use `npm run build` before deploy.
+- Push to GitHub `main`, then deploy to Vercel production.
