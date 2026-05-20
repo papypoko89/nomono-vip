@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SUPABASE_PHOTO_BUCKET, isSupabaseConfigured, supabase } from './supabaseClient';
 
 type Tab = 'vip' | 'checklist' | 'report' | 'master';
 type TemplateType = 'opening' | 'closing' | 'custom';
@@ -165,7 +166,6 @@ type PhotoUpload = {
 };
 
 type SyncSettings = {
-  sheetEndpoint: string;
   autoSync: boolean;
   lastSyncedAt?: string;
 };
@@ -199,8 +199,6 @@ type AppStore = {
 
 const STORAGE_KEY = 'nomono.vip-complimentary-log.v2';
 const LEGACY_STORAGE_KEY = 'nomono.vip-complimentary-log.v1';
-const DEFAULT_SHEET_ENDPOINT =
-  'https://script.google.com/macros/s/AKfycbzCWhlBw9OFcUjhcqHj0_A5LgW15cdGk4ss4C3KCl6v0CGHSM_RQP_gv7mlzo5IBAwkgA/exec';
 
 const DEFAULT_ITEMS: VipItem[] = [
   { id: 'item-aqua-600', name: 'Aqua 600ml', category: 'Minuman', hpp: 2500, defaultQty: 6, active: true },
@@ -392,7 +390,6 @@ const emptyStore = (): AppStore => ({
   checklistRunItems: [],
   photoUploads: [],
   sync: {
-    sheetEndpoint: DEFAULT_SHEET_ENDPOINT,
     autoSync: true,
   },
 });
@@ -421,7 +418,6 @@ function normalizeStore(value: unknown): AppStore {
     checklistRunItems: Array.isArray(parsed.checklistRunItems) ? parsed.checklistRunItems.map(normalizeRunItem) : [],
     photoUploads: Array.isArray(parsed.photoUploads) ? parsed.photoUploads.map(normalizePhotoUpload) : [],
     sync: {
-      sheetEndpoint: parsed.sync?.sheetEndpoint ?? DEFAULT_SHEET_ENDPOINT,
       autoSync: true,
       lastSyncedAt: parsed.sync?.lastSyncedAt,
     },
@@ -628,62 +624,44 @@ function storePayload(store: AppStore) {
   };
 }
 
-function withQuery(url: string, params: Record<string, string>) {
-  const next = new URL(url);
-  Object.entries(params).forEach(([key, value]) => next.searchParams.set(key, value));
-  return next.toString();
+async function readSupabaseStore(): Promise<AppStore> {
+  return (await readSupabaseStoreResult()).store;
 }
 
-function readSheetStore(endpoint: string): Promise<AppStore> {
-  return new Promise((resolve, reject) => {
-    const callbackName = `nomonoSheet_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const script = document.createElement('script');
-    const cleanup = () => {
-      delete (window as unknown as Record<string, unknown>)[callbackName];
-      script.remove();
-    };
-
-    (window as unknown as Record<string, (response: { ok?: boolean; data?: unknown; error?: string }) => void>)[callbackName] = (
-      response,
-    ) => {
-      cleanup();
-      if (!response?.ok) {
-        reject(new Error(response?.error || 'Gagal membaca Google Sheet.'));
-        return;
-      }
-      resolve(normalizeStore(response.data));
-    };
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error('Tidak bisa menghubungi Apps Script URL.'));
-    };
-    script.src = withQuery(endpoint, { action: 'read', callback: callbackName, t: String(Date.now()) });
-    document.body.appendChild(script);
-  });
-}
-
-async function writeSheetStore(endpoint: string, store: AppStore) {
-  await fetch(endpoint, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'write', data: storePayload(store) }),
-  });
-}
-
-async function uploadPhoto(endpoint: string, payload: Record<string, string>) {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'uploadPhoto', ...payload }),
-  });
-  const data = (await response.json()) as { ok?: boolean; fileUrl?: string; thumbnailUrl?: string; error?: string };
-  if (!data.ok) throw new Error(data.error || 'Upload foto gagal.');
+async function readSupabaseStoreResult(): Promise<{ store: AppStore; isEmpty: boolean }> {
+  if (!isSupabaseConfigured) throw new Error('Supabase env belum dikonfigurasi.');
+  const { data, error } = await supabase.from('nomono_app_state').select('data').eq('id', 'main').maybeSingle();
+  if (error) throw new Error(error.message);
+  const isEmpty = !data?.data || !Object.keys(data.data as Record<string, unknown>).length;
   return {
-    fileUrl: data.fileUrl || '',
-    thumbnailUrl: data.thumbnailUrl || data.fileUrl || '',
+    store: isEmpty ? emptyStore() : normalizeStore(data.data),
+    isEmpty,
   };
+}
+
+async function writeSupabaseStore(store: AppStore) {
+  if (!isSupabaseConfigured) throw new Error('Supabase env belum dikonfigurasi.');
+  const { error } = await supabase.from('nomono_app_state').upsert({
+    id: 'main',
+    data: storePayload(store),
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function uploadPhotoToSupabase(dataUrl: string, fileName: string, pathPrefix: string) {
+  if (!isSupabaseConfigured) throw new Error('Supabase env belum dikonfigurasi.');
+  const blob = await (await fetch(dataUrl)).blob();
+  const cleanPath = [pathPrefix, fileName]
+    .join('/')
+    .replace(/\/+/g, '/')
+    .replace(/[^a-zA-Z0-9./_-]+/g, '-');
+  const { error } = await supabase.storage.from(SUPABASE_PHOTO_BUCKET).upload(cleanPath, blob, {
+    contentType: blob.type || 'image/jpeg',
+    upsert: true,
+  });
+  if (error) throw new Error(error.message);
+  const { data } = supabase.storage.from(SUPABASE_PHOTO_BUCKET).getPublicUrl(cleanPath);
+  return data.publicUrl;
 }
 
 function calculateLine(line: VipSessionItem): VipSessionItem {
@@ -734,7 +712,9 @@ function App() {
   const [vipForm, setVipForm] = useState<VipForm>(() => makeVipForm(DEFAULT_ITEMS, DEFAULT_STAFF));
   const [vipEditingId, setVipEditingId] = useState<string | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState(() => localStorage.getItem('nomono.selectedStaffId') || '');
-  const [syncStatus, setSyncStatus] = useState('Google Sheet siap disambungkan.');
+  const [syncStatus, setSyncStatus] = useState(
+    isSupabaseConfigured ? 'Supabase siap disambungkan.' : 'Supabase env belum dikonfigurasi.',
+  );
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [photoViewer, setPhotoViewer] = useState<PhotoViewer | null>(null);
   const skipAutoSyncRef = useRef(false);
@@ -765,63 +745,56 @@ function App() {
   }, [store.items, store.staff]);
 
   useEffect(() => {
-    const endpoint = store.sync.sheetEndpoint.trim();
     remoteReadyRef.current = false;
-    if (!endpoint) {
-      remoteReadyRef.current = true;
+    if (!isSupabaseConfigured) {
+      setSyncStatus('Supabase env belum dikonfigurasi. Mode lokal tetap aktif.');
       return;
     }
 
     let cancelled = false;
-    setSyncStatus('Memuat database dari Google Sheet...');
-    readSheetStore(endpoint)
-      .then((remote) => {
+    setSyncStatus('Memuat database dari Supabase...');
+    readSupabaseStoreResult()
+      .then(async ({ store: remote, isEmpty }) => {
         if (cancelled) return;
         remoteReadyRef.current = true;
         pendingLocalSyncRef.current = false;
+        if (isEmpty) {
+          await writeSupabaseStore(store);
+          if (cancelled) return;
+          setSyncStatus('Database Supabase kosong, data lokal sudah dikirim sebagai awal.');
+          return;
+        }
         skipAutoSyncRef.current = true;
         setStore((current) => ({ ...remote, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
-        setSyncStatus('Database Google Sheet sudah dimuat.');
+        setSyncStatus('Database Supabase sudah dimuat.');
       })
       .catch((error) => {
         if (cancelled) return;
-        setSyncStatus(error instanceof Error ? error.message : 'Gagal memuat Google Sheet. Mode lokal tetap aktif.');
+        setSyncStatus(error instanceof Error ? error.message : 'Gagal memuat Supabase. Mode lokal tetap aktif.');
       });
 
     return () => {
       cancelled = true;
     };
-  }, [store.sync.sheetEndpoint]);
+  }, []);
 
   useEffect(() => {
     if (skipAutoSyncRef.current) {
       skipAutoSyncRef.current = false;
       return;
     }
-    if (!store.sync.autoSync || !store.sync.sheetEndpoint.trim()) return;
+    if (!store.sync.autoSync || !isSupabaseConfigured) return;
     if (!pendingLocalSyncRef.current) return;
     if (!remoteReadyRef.current) {
-      setSyncStatus('Auto-sync menunggu database Google Sheet dimuat.');
+      setSyncStatus('Auto-sync menunggu database Supabase dimuat.');
       return;
     }
 
     const timer = window.setTimeout(async () => {
       try {
-        await writeSheetStore(store.sync.sheetEndpoint.trim(), store);
+        await writeSupabaseStore(store);
         pendingLocalSyncRef.current = false;
-        if (hasLocalPhotoPayload(store)) {
-          setSyncStatus('Foto dikirim ke Google Drive, menunggu URL...');
-          await delay(1800);
-          const remote = await readSheetStore(store.sync.sheetEndpoint.trim());
-          skipAutoSyncRef.current = true;
-          setStore((current) => ({
-            ...remote,
-            sync: { ...current.sync, lastSyncedAt: nowIso() },
-          }));
-          setSyncStatus('URL foto Google Drive sudah dimuat ke app.');
-          return;
-        }
-        setSyncStatus(`Auto-sync tersimpan ${timeNow()}`);
+        setSyncStatus(`Auto-sync Supabase tersimpan ${timeNow()}`);
       } catch (error) {
         setSyncStatus(error instanceof Error ? error.message : 'Auto-sync gagal.');
       }
@@ -1004,28 +977,19 @@ function App() {
     let photoUrl = item.photoUrl;
     let thumbnailUrl = dataUrl;
 
-    if (store.sync.sheetEndpoint.trim()) {
+    if (isSupabaseConfigured) {
       try {
-        const uploaded = await uploadPhoto(store.sync.sheetEndpoint.trim(), {
-          dataUrl,
-          fileName,
-          runId: run.runId,
-          runItemId: item.runItemId,
-          staffId: run.staffId,
-          staffName: run.staffName,
-          templateType: run.templateType,
-          date: run.date,
-        });
-        photoUrl = uploaded.fileUrl;
-        thumbnailUrl = uploaded.thumbnailUrl || uploaded.fileUrl;
-        setSyncStatus('Foto tersimpan ke Google Drive.');
-        notify('Foto tersimpan', 'Foto bukti masuk ke Google Drive dan tampil di report.');
+        const publicUrl = await uploadPhotoToSupabase(dataUrl, fileName, `${run.date}/${run.templateType}/${run.staffId}`);
+        photoUrl = publicUrl;
+        thumbnailUrl = publicUrl;
+        setSyncStatus('Foto tersimpan ke Supabase Storage.');
+        notify('Foto tersimpan', 'Foto bukti masuk ke Supabase Storage dan tampil di report.');
       } catch {
-        setSyncStatus('Foto tampil lokal dulu. Apps Script akan menyimpan ke Drive saat data dikirim.');
-        notify('Foto tersimpan lokal', 'Foto akan ikut dikirim ke Drive saat sync berhasil.', 'info');
+        setSyncStatus('Foto tampil lokal dulu. Upload Supabase gagal.');
+        notify('Foto tersimpan lokal', 'Cek koneksi atau policy Supabase Storage.', 'warning');
       }
     } else {
-      notify('Foto tersimpan lokal', 'Isi Apps Script URL agar foto tersimpan ke Google Drive.', 'info');
+      notify('Foto tersimpan lokal', 'Konfigurasi Supabase env agar foto tersimpan ke storage.', 'info');
     }
 
     const uploadedAt = nowIso();
@@ -1060,47 +1024,39 @@ function App() {
     }));
   };
 
-  const pushToSheet = async () => {
-    const endpoint = store.sync.sheetEndpoint.trim();
-    if (!endpoint) {
-      setSyncStatus('Isi Apps Script URL dulu.');
+  const pushToRemote = async () => {
+    if (!isSupabaseConfigured) {
+      setSyncStatus('Supabase env belum dikonfigurasi.');
       return;
     }
-    setSyncStatus('Mengirim data lokal ke Google Sheet...');
+    setSyncStatus('Mengirim data lokal ke Supabase...');
     try {
-      await writeSheetStore(endpoint, store);
-      let nextStore = store;
-      if (hasLocalPhotoPayload(store)) {
-        setSyncStatus('Foto dikirim ke Google Drive, menunggu URL...');
-        await delay(1800);
-        nextStore = await readSheetStore(endpoint);
-      }
+      await writeSupabaseStore(store);
       pendingLocalSyncRef.current = false;
       remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
-      setStore((current) => ({ ...nextStore, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
-      setSyncStatus(hasLocalPhotoPayload(store) ? 'Data dan URL foto sudah dimuat dari Google Sheet.' : 'Data lokal sudah dikirim ke Google Sheet.');
+      setStore((current) => ({ ...current, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
+      setSyncStatus('Data lokal sudah dikirim ke Supabase.');
     } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : 'Gagal kirim ke Google Sheet.');
+      setSyncStatus(error instanceof Error ? error.message : 'Gagal kirim ke Supabase.');
     }
   };
 
-  const pullFromSheet = async () => {
-    const endpoint = store.sync.sheetEndpoint.trim();
-    if (!endpoint) {
-      setSyncStatus('Isi Apps Script URL dulu.');
+  const pullFromRemote = async () => {
+    if (!isSupabaseConfigured) {
+      setSyncStatus('Supabase env belum dikonfigurasi.');
       return;
     }
-    setSyncStatus('Menarik data dari Google Sheet...');
+    setSyncStatus('Menarik data dari Supabase...');
     try {
-      const remote = await readSheetStore(endpoint);
+      const remote = await readSupabaseStore();
       pendingLocalSyncRef.current = false;
       remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
       setStore((current) => ({ ...remote, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
-      setSyncStatus('Data Google Sheet sudah dimuat.');
+      setSyncStatus('Data Supabase sudah dimuat.');
     } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : 'Gagal tarik dari Google Sheet.');
+      setSyncStatus(error instanceof Error ? error.message : 'Gagal tarik dari Supabase.');
     }
   };
 
@@ -1168,8 +1124,8 @@ function App() {
             syncStatus={syncStatus}
             setStore={updateStore}
             notify={notify}
-            onPushToSheet={pushToSheet}
-            onPullFromSheet={pullFromSheet}
+            onPushToRemote={pushToRemote}
+            onPullFromRemote={pullFromRemote}
           />
         )}
       </main>
@@ -1999,15 +1955,15 @@ function MasterScreen({
   syncStatus,
   setStore,
   notify,
-  onPushToSheet,
-  onPullFromSheet,
+  onPushToRemote,
+  onPullFromRemote,
 }: {
   store: AppStore;
   syncStatus: string;
   setStore: (updater: React.SetStateAction<AppStore>) => void;
   notify: (title: string, body?: string, tone?: ToastMessage['tone']) => void;
-  onPushToSheet: () => void;
-  onPullFromSheet: () => void;
+  onPushToRemote: () => void;
+  onPullFromRemote: () => void;
 }) {
   const [section, setSection] = useState<'staff' | 'roles' | 'templates' | 'vip' | 'sync'>('staff');
   const [draft, setDraft] = useState<AppStore>(() => store);
@@ -2136,7 +2092,7 @@ function MasterScreen({
     <section className="stack">
       <ScreenTitle
         title="Master Data"
-        subtitle="Kelola staff, role, template checklist, VIP item, dan Google Sheets sync."
+        subtitle="Kelola staff, role, template checklist, VIP item, dan Supabase sync."
         action={
           <div className="cardActions">
             <button className="secondaryBtn" onClick={cancelMaster} disabled={!masterDirty}>
@@ -2165,31 +2121,24 @@ function MasterScreen({
 
       {section === 'sync' && (
         <div className="panel syncPanel">
-          <Field label="Apps Script URL">
-            <input
-              value={draft.sync.sheetEndpoint}
-              placeholder="https://script.google.com/macros/s/..."
-              onChange={(event) =>
-                updateDraft((current) => ({
-                  ...current,
-                  sync: { ...current.sync, sheetEndpoint: event.target.value.trim(), autoSync: true },
-                }))
-              }
-            />
-          </Field>
+          <div className="syncInfoBox">
+            <span>Database</span>
+            <strong>Supabase</strong>
+            <p>{isSupabaseConfigured ? 'Project Supabase sudah terhubung dari environment Vercel/Vite.' : 'Environment Supabase belum lengkap.'}</p>
+          </div>
           <div className="syncControls">
             <div className="syncAlwaysOn">Auto-sync aktif</div>
             <div className="syncButtons">
-              <button className="secondaryBtn" onClick={onPullFromSheet} disabled={masterDirty}>
+              <button className="secondaryBtn" onClick={onPullFromRemote} disabled={masterDirty}>
                 <Download size={16} /> Tarik
               </button>
-              <button className="primaryBtn" onClick={onPushToSheet} disabled={masterDirty}>
+              <button className="primaryBtn" onClick={onPushToRemote} disabled={masterDirty}>
                 <Save size={16} /> Kirim
               </button>
             </div>
           </div>
           <p className="syncStatus">{syncStatus}</p>
-          {masterDirty && <p className="syncStatus muted">Simpan atau batal dulu sebelum tarik/kirim Google Sheet.</p>}
+          {masterDirty && <p className="syncStatus muted">Simpan atau batal dulu sebelum tarik/kirim Supabase.</p>}
           {draft.sync.lastSyncedAt && (
             <p className="syncStatus muted">
               Sync terakhir: {new Date(draft.sync.lastSyncedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
@@ -2671,10 +2620,6 @@ function isRunSubmitted(run: ChecklistRun) {
   return run.status === 'completed' || run.status === 'has_issue';
 }
 
-function hasLocalPhotoPayload(store: AppStore) {
-  return store.checklistRunItems.some((item) => Boolean(item.photoDataUrl && !item.photoUrl));
-}
-
 function photoPreviewSrc(item: Pick<ChecklistRunItem, 'photoDataUrl' | 'photoThumbnailUrl' | 'photoUrl'>) {
   if (item.photoDataUrl) return item.photoDataUrl;
   const source = item.photoThumbnailUrl || item.photoUrl;
@@ -2703,10 +2648,6 @@ function driveThumbnailUrl(url?: string) {
 function driveViewUrl(url?: string) {
   const id = driveFileId(url);
   return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : '';
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function buildVipRecap(sessions: VipSession[]) {

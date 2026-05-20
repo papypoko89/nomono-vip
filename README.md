@@ -1,6 +1,6 @@
-# VIP Complimentary Log
+# Nomono VIP + Staff SOP Checklist
 
-Mobile-first internal app untuk mencatat complimentary VIP room per sesi.
+Mobile-first internal app untuk mencatat complimentary VIP room, checklist SOP staff, report harian, foto bukti, dan master data operasional.
 
 ## Run
 
@@ -24,26 +24,25 @@ http://127.0.0.1:5173
 - Log harian dengan filter hari ini, bulan ini, custom date, dan belum input Majoo.
 - Rekap bulanan, total biaya, item paling sering terpakai, rata-rata Aqua per sesi.
 - Master item, HPP, default qty, status aktif/nonaktif.
-- Master staff.
+- Master staff, role, template checklist, dan item checklist.
+- Report checklist dengan detail item dan foto bukti.
 - Export CSV.
-- Persistence via localStorage.
-- Optional Google Sheets database via Google Apps Script Web App.
+- Persistence lokal via localStorage sebagai fallback.
+- Sync database via Supabase.
+- Foto bukti via Supabase Storage.
 
-## Google Sheets Setup
+## Supabase Setup
 
-1. Buat Google Sheet baru.
-2. Buka `Extensions > Apps Script`.
-3. Paste isi file `google-apps-script/VipComplimentaryLog.gs`.
-4. Klik `Save`.
-5. Pilih function `setupOnce`, lalu klik `Run`.
-6. Ikuti proses authorization Google sampai selesai.
-7. Klik `Deploy > New deployment`.
-8. Pilih type `Web app`.
-9. Set `Execute as: Me`.
-10. Set `Who has access: Anyone`.
-11. Copy Web App URL.
-12. Di app, buka `Master > Google Sheet Sync`, paste URL itu.
-13. Klik `Kirim` untuk mengirim data lokal pertama kali, lalu aktifkan `Auto-sync` jika sudah cocok.
+1. Buat project Supabase.
+2. Jalankan migration di `supabase/migrations`.
+3. Buat environment variable dari `.env.example`.
+4. Di Vercel, isi `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY`.
+5. Deploy app.
+
+Data aplikasi disimpan di tabel `nomono_app_state`.
+Foto bukti disimpan di bucket Supabase Storage `nomono-checklist-photos`.
+
+File `google-apps-script/VipComplimentaryLog.gs` masih disimpan sebagai arsip backend lama, tetapi app saat ini menggunakan Supabase.
 
 ## Visual System
 
