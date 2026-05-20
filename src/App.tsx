@@ -4,6 +4,7 @@ import {
   Camera,
   Check,
   ChevronDown,
+  Clock,
   ClipboardCheck,
   ClipboardList,
   Download,
@@ -35,13 +36,16 @@ type PermissionLevel = 'Staff' | 'Supervisor' | 'Manager';
 type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 type IssuePriority = 'low' | 'medium' | 'high' | 'urgent';
 type IssueSource = 'checklist' | 'vip_complimentary' | 'manual';
+type ShiftNumber = 1 | 2 | 3;
 
 type VipItem = {
   id: string;
   name: string;
   category: string;
+  unit: string;
   hpp: number;
   defaultQty: number;
+  isDraft: boolean;
   active: boolean;
 };
 
@@ -61,11 +65,14 @@ type VipSessionItem = {
 type VipSession = {
   id: string;
   date: string;
+  shift: ShiftNumber;
   startTime: string;
   endTime: string;
   bookingName: string;
   room: string;
+  cashierStaffId: string;
   staffName: string;
+  recapId: string;
   status: 'draft' | 'completed';
   notes?: string;
   createdAt: string;
@@ -207,6 +214,27 @@ type SyncSettings = {
   lastSyncedAt?: string;
 };
 
+type ShiftSetting = {
+  shift: ShiftNumber;
+  label: string;
+  startTime: string;
+  endTime: string;
+  isActive: boolean;
+};
+
+type MajooRecap = {
+  recapId: string;
+  date: string;
+  shift: ShiftNumber;
+  cashierStaffId: string;
+  statusMajoo: 'pending' | 'done';
+  totalHpp: number;
+  recapAt: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type ToastMessage = {
   id: string;
   title: string;
@@ -233,6 +261,8 @@ type AppStore = {
   photoUploads: PhotoUpload[];
   issues: Issue[];
   issueComments: IssueComment[];
+  shifts: ShiftSetting[];
+  majooRecaps: MajooRecap[];
   sync: SyncSettings;
 };
 
@@ -251,15 +281,23 @@ const RELATIONAL_TABLES = [
   'nomono_photo_uploads',
   'nomono_issues',
   'nomono_issue_comments',
+  'nomono_shift_settings',
+  'nomono_majoo_recaps',
   'nomono_settings',
 ] as const;
 const REALTIME_TABLES = ['nomono_app_state', ...RELATIONAL_TABLES] as const;
 
 const DEFAULT_ITEMS: VipItem[] = [
-  { id: 'item-aqua-600', name: 'Aqua 600ml', category: 'Minuman', hpp: 2500, defaultQty: 6, active: true },
-  { id: 'item-pocari-500', name: 'Pocari Sweat 500ml', category: 'Minuman', hpp: 6000, defaultQty: 2, active: true },
-  { id: 'item-mizone-500', name: 'Mizone 500ml', category: 'Minuman', hpp: 5000, defaultQty: 2, active: true },
-  { id: 'item-coconut-rtd', name: 'Coconut RTD', category: 'Minuman', hpp: 8000, defaultQty: 2, active: true },
+  { id: 'item-aqua-600', name: 'Aqua 600ml', category: 'Minuman', unit: 'botol', hpp: 2500, defaultQty: 6, isDraft: true, active: true },
+  { id: 'item-pocari-500', name: 'Pocari Sweat 500ml', category: 'Minuman', unit: 'botol', hpp: 6000, defaultQty: 2, isDraft: true, active: true },
+  { id: 'item-mizone-500', name: 'Mizone 500ml', category: 'Minuman', unit: 'botol', hpp: 5000, defaultQty: 2, isDraft: true, active: true },
+  { id: 'item-coconut-rtd', name: 'Coconut RTD', category: 'Minuman', unit: 'botol', hpp: 8000, defaultQty: 2, isDraft: true, active: true },
+];
+
+const DEFAULT_SHIFTS: ShiftSetting[] = [
+  { shift: 1, label: 'Shift 1', startTime: '08:00', endTime: '12:00', isActive: true },
+  { shift: 2, label: 'Shift 2', startTime: '12:00', endTime: '17:00', isActive: true },
+  { shift: 3, label: 'Shift 3', startTime: '17:00', endTime: '22:00', isActive: true },
 ];
 
 const seedTime = '2026-05-20T00:00:00.000Z';
@@ -448,6 +486,8 @@ const emptyStore = (): AppStore => ({
   photoUploads: [],
   issues: [],
   issueComments: [],
+  shifts: DEFAULT_SHIFTS,
+  majooRecaps: [],
   sync: {
     autoSync: true,
   },
@@ -478,6 +518,8 @@ function normalizeStore(value: unknown): AppStore {
     photoUploads: Array.isArray(parsed.photoUploads) ? parsed.photoUploads.map(normalizePhotoUpload) : [],
     issues: Array.isArray(parsed.issues) ? parsed.issues.map(normalizeIssue) : [],
     issueComments: Array.isArray(parsed.issueComments) ? parsed.issueComments.map(normalizeIssueComment) : [],
+    shifts: Array.isArray(parsed.shifts) && parsed.shifts.length ? parsed.shifts.map(normalizeShiftSetting) : DEFAULT_SHIFTS,
+    majooRecaps: Array.isArray(parsed.majooRecaps) ? parsed.majooRecaps.map(normalizeMajooRecap) : [],
     sync: {
       autoSync: true,
       lastSyncedAt: parsed.sync?.lastSyncedAt,
@@ -490,8 +532,10 @@ function normalizeVipItem(item: Partial<VipItem>): VipItem {
     id: String(item.id || uid()),
     name: String(item.name || ''),
     category: String(item.category || 'Minuman'),
+    unit: String(item.unit || 'botol'),
     hpp: Math.max(0, Number(item.hpp) || 0),
     defaultQty: Math.max(0, Math.trunc(Number(item.defaultQty) || 0)),
+    isDraft: item.isDraft !== false,
     active: item.active !== false,
   };
 }
@@ -500,11 +544,14 @@ function normalizeSession(session: Partial<VipSession>): VipSession {
   return {
     id: String(session.id || uid()),
     date: normalizeDate(session.date),
-    startTime: String(session.startTime || '08:00'),
-    endTime: String(session.endTime || '09:00'),
+    shift: normalizeShiftNumber(session.shift),
+    startTime: normalizeTime(session.startTime, '08:00'),
+    endTime: normalizeTime(session.endTime, '09:00'),
     bookingName: String(session.bookingName || ''),
     room: String(session.room || 'VIP Room'),
+    cashierStaffId: String(session.cashierStaffId || ''),
     staffName: String(session.staffName || ''),
+    recapId: String(session.recapId || ''),
     status: session.status === 'draft' ? 'draft' : 'completed',
     notes: String(session.notes || ''),
     createdAt: String(session.createdAt || nowIso()),
@@ -673,6 +720,36 @@ function normalizeIssueComment(comment: Partial<IssueComment>): IssueComment {
   };
 }
 
+function normalizeShiftSetting(shift: Partial<ShiftSetting>): ShiftSetting {
+  return {
+    shift: normalizeShiftNumber(shift.shift),
+    label: String(shift.label || `Shift ${normalizeShiftNumber(shift.shift)}`),
+    startTime: normalizeTime(shift.startTime, '08:00'),
+    endTime: normalizeTime(shift.endTime, '12:00'),
+    isActive: shift.isActive !== false,
+  };
+}
+
+function normalizeMajooRecap(recap: Partial<MajooRecap>): MajooRecap {
+  return {
+    recapId: String(recap.recapId || uid()),
+    date: normalizeDate(recap.date),
+    shift: normalizeShiftNumber(recap.shift),
+    cashierStaffId: String(recap.cashierStaffId || ''),
+    statusMajoo: recap.statusMajoo === 'done' ? 'done' : 'pending',
+    totalHpp: Math.max(0, Number(recap.totalHpp) || 0),
+    recapAt: String(recap.recapAt || ''),
+    notes: String(recap.notes || ''),
+    createdAt: String(recap.createdAt || nowIso()),
+    updatedAt: String(recap.updatedAt || nowIso()),
+  };
+}
+
+function normalizeShiftNumber(value: unknown): ShiftNumber {
+  const parsed = Number(value);
+  return parsed === 2 || parsed === 3 ? parsed : 1;
+}
+
 function normalizeIssueSource(value: unknown): IssueSource {
   if (value === 'checklist' || value === 'vip_complimentary') return value;
   return 'manual';
@@ -712,6 +789,44 @@ function normalizeDate(value: unknown) {
   return todayISO();
 }
 
+function normalizeTime(value: unknown, fallback = '08:00') {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const simple = trimmed.match(/^(\d{1,2}):(\d{2})/);
+    if (simple) {
+      const hour = Math.min(23, Math.max(0, Number(simple[1]) || 0));
+      const minute = Math.min(59, Math.max(0, Number(simple[2]) || 0));
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+    }
+  }
+  return fallback;
+}
+
+function minutesFromTime(value: string) {
+  const [hour, minute] = normalizeTime(value).split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+function shiftForCheckoutTime(shifts: ShiftSetting[], checkoutTime: string): ShiftNumber {
+  const minute = minutesFromTime(checkoutTime);
+  const active = shifts.filter((shift) => shift.isActive).sort((a, b) => a.shift - b.shift);
+  const match = active.find((shift) => {
+    const start = minutesFromTime(shift.startTime);
+    const end = minutesFromTime(shift.endTime);
+    return start <= end ? minute >= start && minute < end : minute >= start || minute < end;
+  });
+  return match?.shift || active[0]?.shift || 1;
+}
+
+function shiftLabel(shifts: ShiftSetting[], shiftNumber: ShiftNumber) {
+  const shift = shifts.find((item) => item.shift === shiftNumber);
+  return shift ? `${shift.label} (${shift.startTime}-${shift.endTime})` : `Shift ${shiftNumber}`;
+}
+
 function loadStore() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -735,6 +850,8 @@ function storePayload(store: AppStore) {
     photoUploads: store.photoUploads,
     issues: store.issues,
     issueComments: store.issueComments,
+    shifts: store.shifts,
+    majooRecaps: store.majooRecaps,
   };
 }
 
@@ -803,6 +920,8 @@ async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: 
     photoUploads,
     issues,
     issueComments,
+    shifts,
+    majooRecaps,
     settings,
   ] = await Promise.all([
     readRows('nomono_vip_items', 'name'),
@@ -817,6 +936,8 @@ async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: 
     readRows('nomono_photo_uploads', 'uploaded_at'),
     readRows('nomono_issues', 'updated_at'),
     readRows('nomono_issue_comments', 'created_at'),
+    readRows('nomono_shift_settings', 'shift'),
+    readRows('nomono_majoo_recaps', 'date'),
     readRows('nomono_settings'),
   ]);
 
@@ -837,8 +958,10 @@ async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: 
       id: stringCell(row.id),
       name: stringCell(row.name),
       category: stringCell(row.category, 'Minuman'),
+      unit: stringCell(row.unit, 'botol'),
       hpp: numberCell(row.hpp),
       defaultQty: numberCell(row.default_qty),
+      isDraft: boolCell(row.is_draft, true),
       active: boolCell(row.active, true),
     })),
     staff: staff.map((row) => ({
@@ -885,11 +1008,14 @@ async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: 
     sessions: sessions.map((row) => ({
       id: stringCell(row.id),
       date: stringCell(row.date, todayISO()),
+      shift: numberCell(row.shift, 1),
       startTime: stringCell(row.start_time, '08:00'),
       endTime: stringCell(row.end_time, '09:00'),
       bookingName: stringCell(row.booking_name),
       room: stringCell(row.room, 'VIP Room'),
+      cashierStaffId: stringCell(row.cashier_staff_id),
       staffName: stringCell(row.staff_name),
+      recapId: stringCell(row.recap_id),
       status: stringCell(row.status, 'completed'),
       notes: stringCell(row.notes),
       createdAt: stringCell(row.created_at, nowIso()),
@@ -981,6 +1107,25 @@ async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: 
       createdByName: stringCell(row.created_by_name),
       createdAt: stringCell(row.created_at, nowIso()),
     })),
+    shifts: shifts.map((row) => ({
+      shift: numberCell(row.shift, 1),
+      label: stringCell(row.label, `Shift ${numberCell(row.shift, 1)}`),
+      startTime: stringCell(row.start_time, '08:00'),
+      endTime: stringCell(row.end_time, '12:00'),
+      isActive: boolCell(row.is_active, true),
+    })),
+    majooRecaps: majooRecaps.map((row) => ({
+      recapId: stringCell(row.recap_id),
+      date: stringCell(row.date, todayISO()),
+      shift: numberCell(row.shift, 1),
+      cashierStaffId: stringCell(row.cashier_staff_id),
+      statusMajoo: stringCell(row.status_majoo, 'pending'),
+      totalHpp: numberCell(row.total_hpp),
+      recapAt: stringCell(row.recap_at),
+      notes: stringCell(row.notes),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
     sync: {
       autoSync: boolCell(settings[0]?.auto_sync, true),
       lastSyncedAt: stringCell(settings[0]?.last_synced_at),
@@ -1028,8 +1173,10 @@ async function writeRelationalStore(store: AppStore) {
         id: item.id,
         name: item.name,
         category: item.category,
+        unit: item.unit,
         hpp: item.hpp,
         default_qty: item.defaultQty,
+        is_draft: item.isDraft,
         active: item.active,
       })),
     ),
@@ -1068,11 +1215,14 @@ async function writeRelationalStore(store: AppStore) {
       payload.sessions.map((session) => ({
         id: session.id,
         date: session.date,
+        shift: session.shift,
         start_time: session.startTime,
         end_time: session.endTime,
         booking_name: session.bookingName,
         room: session.room,
+        cashier_staff_id: session.cashierStaffId,
         staff_name: session.staffName,
+        recap_id: session.recapId || null,
         status: session.status,
         notes: session.notes || '',
         created_at: isoOrNull(session.createdAt),
@@ -1193,6 +1343,33 @@ async function writeRelationalStore(store: AppStore) {
         created_at: isoOrNull(comment.createdAt),
       })),
     ),
+    replaceRows(
+      'nomono_shift_settings',
+      'shift',
+      payload.shifts.map((shift) => ({
+        shift: shift.shift,
+        label: shift.label,
+        start_time: shift.startTime,
+        end_time: shift.endTime,
+        is_active: shift.isActive,
+      })),
+    ),
+    replaceRows(
+      'nomono_majoo_recaps',
+      'recap_id',
+      payload.majooRecaps.map((recap) => ({
+        recap_id: recap.recapId,
+        date: recap.date,
+        shift: recap.shift,
+        cashier_staff_id: recap.cashierStaffId,
+        status_majoo: recap.statusMajoo,
+        total_hpp: recap.totalHpp,
+        recap_at: isoOrNull(recap.recapAt),
+        notes: recap.notes,
+        created_at: isoOrNull(recap.createdAt),
+        updated_at: isoOrNull(recap.updatedAt),
+      })),
+    ),
     writeRelationalSettings(store.sync),
   ]);
 }
@@ -1257,6 +1434,7 @@ function isoOrNull(value?: string) {
 }
 
 function postgrestListValue(value: string) {
+  if (/^\d+$/.test(value)) return value;
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
@@ -1354,7 +1532,7 @@ function calculateLine(line: VipSessionItem): VipSessionItem {
     preparedQty,
     sealedLeftQty,
     usedQty,
-    returnToStockQty: sealedLeftQty,
+    returnToStockQty: usedQty,
     totalCost: usedQty * (Number(line.hpp) || 0),
   };
 }
@@ -1368,29 +1546,33 @@ function createVipLine(item: VipItem): VipSessionItem {
     preparedQty: item.defaultQty,
     sealedLeftQty: 0,
     usedQty: item.defaultQty,
-    returnToStockQty: 0,
+    returnToStockQty: item.defaultQty,
     totalCost: item.defaultQty * item.hpp,
     majooInputDone: false,
   });
 }
 
-function makeVipForm(items: VipItem[], staff: Staff[]): VipForm {
+function makeVipForm(items: VipItem[], staff: Staff[], shifts: ShiftSetting[] = DEFAULT_SHIFTS): VipForm {
+  const endTime = '09:00';
   return {
     date: todayISO(),
     startTime: '08:00',
-    endTime: '09:00',
+    endTime,
+    shift: shiftForCheckoutTime(shifts, endTime),
     bookingName: '',
     room: 'VIP Room',
+    cashierStaffId: staff.find((person) => person.isActive)?.staffId || '',
     staffName: staff.find((person) => person.isActive)?.staffName || '',
+    recapId: '',
     notes: '',
-    items: items.filter((item) => item.active).map(createVipLine),
+    items: items.filter((item) => item.active && item.isDraft).map(createVipLine),
   };
 }
 
 function App() {
   const [tab, setTab] = useState<Tab>('vip');
   const [store, setStore] = useState<AppStore>(loadStore);
-  const [vipForm, setVipForm] = useState<VipForm>(() => makeVipForm(DEFAULT_ITEMS, DEFAULT_STAFF));
+  const [vipForm, setVipForm] = useState<VipForm>(() => makeVipForm(DEFAULT_ITEMS, DEFAULT_STAFF, DEFAULT_SHIFTS));
   const [vipEditingId, setVipEditingId] = useState<string | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState(() => localStorage.getItem('nomono.selectedStaffId') || '');
   const [syncStatus, setSyncStatus] = useState(
@@ -1423,10 +1605,12 @@ function App() {
   useEffect(() => {
     setVipForm((current) => ({
       ...current,
+      shift: current.shift || shiftForCheckoutTime(store.shifts, current.endTime),
+      cashierStaffId: current.cashierStaffId || store.staff.find((person) => person.isActive)?.staffId || '',
       staffName: current.staffName || store.staff.find((person) => person.isActive)?.staffName || '',
-      items: current.items.length ? current.items : store.items.filter((item) => item.active).map(createVipLine),
+      items: current.items.length ? current.items : store.items.filter((item) => item.active && item.isDraft).map(createVipLine),
     }));
-  }, [store.items, store.staff]);
+  }, [store.items, store.staff, store.shifts]);
 
   useEffect(() => {
     remoteReadyRef.current = false;
@@ -1546,6 +1730,10 @@ function App() {
     const payload: VipSession = {
       ...vipForm,
       id: vipEditingId || uid(),
+      startTime: normalizeTime(vipForm.startTime, '08:00'),
+      endTime: normalizeTime(vipForm.endTime, '09:00'),
+      shift: normalizeShiftNumber(vipForm.shift || shiftForCheckoutTime(store.shifts, vipForm.endTime)),
+      staffName: store.staff.find((person) => person.staffId === vipForm.cashierStaffId)?.staffName || vipForm.staffName,
       status: 'completed',
       createdAt: vipEditingId ? store.sessions.find((session) => session.id === vipEditingId)?.createdAt || timestamp : timestamp,
       updatedAt: timestamp,
@@ -1557,9 +1745,10 @@ function App() {
         ? current.sessions.map((session) => (session.id === vipEditingId ? payload : session))
         : [payload, ...current.sessions],
     }));
-    notify(vipEditingId ? 'VIP log diperbarui' : 'VIP log tersimpan', 'Data complimentary masuk ke penyimpanan lokal dan akan ikut sync.');
+    const topUpQty = getVipTotals(payload.items).usedQty;
+    notify(vipEditingId ? 'VIP log diperbarui' : 'VIP log tersimpan', `Isi ulang ${topUpQty} botol di ruang VIP.`);
     setVipEditingId(null);
-    setVipForm(makeVipForm(store.items, store.staff));
+    setVipForm(makeVipForm(store.items, store.staff, store.shifts));
   };
 
   const patchVipLine = (lineId: string, patch: Partial<VipSessionItem>) => {
@@ -1807,6 +1996,36 @@ function App() {
     notify('Komentar ditambahkan', 'Follow up issue sudah tercatat.');
   };
 
+  const markVipShiftMajoo = (date: string, shift: ShiftNumber, cashierStaffId: string) => {
+    const shiftSessions = store.sessions.filter((session) => session.date === date && session.shift === shift);
+    const recapTotal = getVipTotals(shiftSessions.flatMap((session) => session.items)).totalCost;
+    const timestamp = nowIso();
+    const existing = store.majooRecaps.find((recap) => recap.date === date && recap.shift === shift);
+    const recapId = existing?.recapId || uid();
+    updateStore((current) => ({
+      ...current,
+      majooRecaps: [
+        {
+          recapId,
+          date,
+          shift,
+          cashierStaffId,
+          statusMajoo: 'done',
+          totalHpp: recapTotal,
+          recapAt: timestamp,
+          notes: existing?.notes || '',
+          createdAt: existing?.createdAt || timestamp,
+          updatedAt: timestamp,
+        },
+        ...current.majooRecaps.filter((recap) => recap.recapId !== recapId),
+      ],
+      sessions: current.sessions.map((session) =>
+        session.date === date && session.shift === shift && !session.recapId ? { ...session, recapId, updatedAt: timestamp } : session,
+      ),
+    }));
+    notify('Shift sudah ditandai Majoo', `${shiftLabel(store.shifts, shift)} sudah dikunci untuk rekap.`);
+  };
+
   const pushToRemote = async () => {
     if (!isSupabaseConfigured) {
       setSyncStatus('Supabase env belum dikonfigurasi.');
@@ -1870,11 +2089,14 @@ function App() {
               setVipEditingId(session.id);
               setVipForm({
                 date: session.date,
+                shift: session.shift,
                 startTime: session.startTime,
                 endTime: session.endTime,
                 bookingName: session.bookingName,
                 room: session.room,
+                cashierStaffId: session.cashierStaffId,
                 staffName: session.staffName,
+                recapId: session.recapId,
                 notes: session.notes || '',
                 items: session.items.map(calculateLine),
               });
@@ -1883,7 +2105,7 @@ function App() {
             onDelete={(sessionId) => updateStore((current) => ({ ...current, sessions: current.sessions.filter((session) => session.id !== sessionId) }))}
             onReset={() => {
               setVipEditingId(null);
-              setVipForm(makeVipForm(store.items, store.staff));
+              setVipForm(makeVipForm(store.items, store.staff, store.shifts));
             }}
           />
         )}
@@ -1913,7 +2135,7 @@ function App() {
           />
         )}
 
-        {tab === 'report' && managerMode && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
+        {tab === 'report' && managerMode && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} onMarkVipMajoo={markVipShiftMajoo} />}
 
         {tab === 'issues' && (
           <IssuesScreen
@@ -1976,15 +2198,47 @@ function VipLogScreen({
   onReset: () => void;
 }) {
   const activeStaff = store.staff.filter((person) => person.isActive);
+  const activeItems = store.items.filter((item) => item.active);
   const totals = getVipTotals(form.items);
   const todaySessions = store.sessions.filter((session) => session.date === todayISO());
-  const majooPending = form.items.filter((item) => item.usedQty > 0 && !item.majooInputDone).length;
+  const updateCheckoutTime = (value: string) => {
+    const endTime = normalizeTime(value, form.endTime);
+    setForm((current) => ({
+      ...current,
+      endTime,
+      shift: shiftForCheckoutTime(store.shifts, endTime),
+    }));
+  };
+  const updateCashier = (staffId: string) => {
+    const person = activeStaff.find((item) => item.staffId === staffId);
+    setForm((current) => ({ ...current, cashierStaffId: staffId, staffName: person?.staffName || '' }));
+  };
+  const updateLineItem = (lineId: string, itemId: string) => {
+    const item = activeItems.find((row) => row.id === itemId);
+    if (!item) return;
+    onLineChange(lineId, {
+      itemId: item.id,
+      itemName: item.name,
+      hpp: item.hpp,
+      preparedQty: item.defaultQty,
+      sealedLeftQty: 0,
+    });
+  };
+  const addLine = () => {
+    const existingIds = new Set(form.items.map((item) => item.itemId));
+    const nextItem = activeItems.find((item) => !existingIds.has(item.id)) || activeItems[0];
+    if (!nextItem) return;
+    setForm((current) => ({ ...current, items: [...current.items, createVipLine(nextItem)] }));
+  };
+  const removeLine = (lineId: string) => {
+    setForm((current) => ({ ...current, items: current.items.filter((item) => item.id !== lineId) }));
+  };
 
   return (
     <section className="stack">
       <ScreenTitle
         title={editing ? 'Edit VIP Log' : 'VIP Complimentary Log'}
-        subtitle="Catat item complimentary dan status input Majoo dari satu halaman."
+        subtitle="Input saat checkout: par, sisa segel, dan top-up otomatis."
         action={
           editing ? (
             <button className="secondaryBtn" onClick={onReset}>
@@ -1998,27 +2252,33 @@ function VipLogScreen({
         <Field label="Tanggal">
           <input type="date" value={form.date} onChange={(event) => setFormValue(setForm, 'date', event.target.value)} />
         </Field>
+        <Field label="Shift">
+          <select value={form.shift} onChange={(event) => setFormValue(setForm, 'shift', normalizeShiftNumber(event.target.value))}>
+            {store.shifts.map((shift) => (
+              <option value={shift.shift} key={shift.shift}>
+                {shiftLabel(store.shifts, shift.shift)}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Mulai">
-          <input type="time" value={form.startTime} onChange={(event) => setFormValue(setForm, 'startTime', event.target.value)} />
+          <input type="time" value={form.startTime} onChange={(event) => setFormValue(setForm, 'startTime', normalizeTime(event.target.value, form.startTime))} />
         </Field>
         <Field label="Selesai">
-          <input type="time" value={form.endTime} onChange={(event) => setFormValue(setForm, 'endTime', event.target.value)} />
+          <input type="time" value={form.endTime} onChange={(event) => updateCheckoutTime(event.target.value)} />
         </Field>
-        <Field label="Booking">
-          <input value={form.bookingName} placeholder="Nama booking" onChange={(event) => setFormValue(setForm, 'bookingName', event.target.value)} />
-        </Field>
-        <Field label="Ruangan">
-          <input value={form.room} onChange={(event) => setFormValue(setForm, 'room', event.target.value)} />
-        </Field>
-        <Field label="Staff">
-          <select value={form.staffName} onChange={(event) => setFormValue(setForm, 'staffName', event.target.value)}>
-            <option value="">Pilih staff</option>
+        <Field label="Kasir">
+          <select value={form.cashierStaffId} onChange={(event) => updateCashier(event.target.value)}>
+            <option value="">Pilih kasir</option>
             {activeStaff.map((person) => (
-              <option value={person.staffName} key={person.staffId}>
+              <option value={person.staffId} key={person.staffId}>
                 {person.staffName}
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Booking">
+          <input value={form.bookingName} placeholder="Nama booking" onChange={(event) => setFormValue(setForm, 'bookingName', event.target.value)} />
         </Field>
         <Field label="Catatan">
           <textarea value={form.notes || ''} rows={2} onChange={(event) => setFormValue(setForm, 'notes', event.target.value)} />
@@ -2027,30 +2287,44 @@ function VipLogScreen({
 
       <div className="metricGrid">
         <Metric label="Item Terpakai" value={String(totals.usedQty)} tone="green" />
-        <Metric label="Return Stock" value={String(totals.returnQty)} tone="gold" />
+        <Metric label="Top-up" value={String(totals.returnQty)} tone="gold" />
         {canSeeFinancials ? (
           <Metric label="Total HPP" value={rupiah(totals.totalCost)} tone="green" />
         ) : (
-          <Metric label="Majoo Pending" value={String(majooPending)} tone="red" />
+          <Metric label="Shift" value={String(form.shift)} tone="red" />
         )}
         <Metric label="Log Hari Ini" value={String(todaySessions.length)} tone="red" />
       </div>
 
       <div className="sectionHeader">
         <h2>Item Complimentary</h2>
+        <button className="accentBtn" onClick={addLine} disabled={!activeItems.length}>
+          <Plus size={15} /> Item
+        </button>
       </div>
       <div className="stack tight">
         {form.items.map((line, index) => (
           <article className="itemCard" key={line.id}>
             <div className="itemTop">
               <div className="itemNumber">{index + 1}</div>
-              <div>
-                <strong>{line.itemName}</strong>
+              <div className="itemTopFields">
+                <Field label="Item">
+                  <select value={line.itemId} onChange={(event) => updateLineItem(line.id, event.target.value)}>
+                    {activeItems.map((item) => (
+                      <option value={item.id} key={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <span>{canSeeFinancials ? `${rupiah(line.hpp)} / item` : 'Item complimentary'}</span>
               </div>
+              <button className="iconBtn danger" onClick={() => removeLine(line.id)} aria-label="Hapus item sesi" disabled={form.items.length <= 1}>
+                <Trash2 size={15} />
+              </button>
             </div>
             <div className="qtyGrid">
-              <Field label="Disiapkan">
+              <Field label="Par">
                 <input
                   inputMode="numeric"
                   value={line.preparedQty}
@@ -2070,20 +2344,16 @@ function VipLogScreen({
                 <span>Terpakai</span>
                 <strong>{line.usedQty}</strong>
               </div>
+              <div>
+                <span>Top-up</span>
+                <strong>{line.returnToStockQty}</strong>
+              </div>
               {canSeeFinancials && (
                 <div>
                   <span>HPP</span>
                   <strong>{rupiah(line.totalCost)}</strong>
                 </div>
               )}
-              <label className="checkLine">
-                <input
-                  type="checkbox"
-                  checked={line.majooInputDone}
-                  onChange={(event) => onLineChange(line.id, { majooInputDone: event.target.checked })}
-                />
-                Majoo OK
-              </label>
             </div>
           </article>
         ))}
@@ -2111,7 +2381,7 @@ function VipLogScreen({
                 <span className="eyebrow">{niceDate(session.date)}</span>
                 <h3>{session.bookingName}</h3>
                 <p>
-                  {session.staffName} · {session.room} · {session.startTime}-{session.endTime}
+                  {session.staffName || '-'} - Shift {session.shift} - {normalizeTime(session.startTime)}-{normalizeTime(session.endTime)}
                 </p>
               </div>
               <div className="cardActions">
@@ -2481,10 +2751,11 @@ function DashboardScreen({
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const dayIssues = openIssues.filter((issue) => issue.createdAt.slice(0, 10) === date);
   const vipTotals = getVipTotals(daySessions.flatMap((session) => session.items));
-  const majooPending = daySessions.reduce(
-    (sum, session) => sum + session.items.filter((item) => item.usedQty > 0 && !item.majooInputDone).length,
-    0,
-  );
+  const majooPending = store.shifts.filter(
+    (shift) =>
+      daySessions.some((session) => session.shift === shift.shift) &&
+      !store.majooRecaps.some((recap) => recap.date === date && recap.shift === shift.shift && recap.statusMajoo === 'done'),
+  ).length;
 
   const runCount = (type: TemplateType, status: RunStatus) => dayRuns.filter((run) => run.templateType === type && run.status === status).length;
   const runStarted = (type: TemplateType) => new Set(dayRuns.filter((run) => run.templateType === type).map((run) => run.staffId)).size;
@@ -2595,7 +2866,7 @@ function DashboardScreen({
         <Metric label="VIP Sessions" value={String(daySessions.length)} tone="green" />
         <Metric label="Item Terpakai" value={String(vipTotals.usedQty)} tone="green" />
         <Metric label="Est. Cost" value={rupiah(vipTotals.totalCost)} tone="gold" />
-        <Metric label="Majoo Pending" value={String(majooPending)} tone="red" />
+        <Metric label="Shift Pending Majoo" value={String(majooPending)} tone="red" />
       </div>
 
       <p className="syncStatus muted">{dayItems.length} checklist item tercatat pada tanggal ini.</p>
@@ -2603,10 +2874,18 @@ function DashboardScreen({
   );
 }
 
-function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (photo: PhotoViewer) => void }) {
+function ReportScreen({
+  store,
+  onOpenPhoto,
+  onMarkVipMajoo,
+}: {
+  store: AppStore;
+  onOpenPhoto: (photo: PhotoViewer) => void;
+  onMarkVipMajoo: (date: string, shift: ShiftNumber, cashierStaffId: string) => void;
+}) {
   const [reportMode, setReportMode] = useState<'checklist' | 'vip'>('checklist');
   const [date, setDate] = useState(todayISO());
-  const [selectedMonth, setSelectedMonth] = useState(todayISO().slice(0, 7));
+  const [selectedShift, setSelectedShift] = useState<ShiftNumber>(() => shiftForCheckoutTime(DEFAULT_SHIFTS, timeNow()));
   const [staffId, setStaffId] = useState('all');
   const [templateType, setTemplateType] = useState<'all' | TemplateType>('all');
   const [status, setStatus] = useState<'all' | RunStatus>('all');
@@ -2649,15 +2928,8 @@ function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (p
       <section className="stack">
         <ScreenTitle
           title="Report"
-          subtitle="Pilih report checklist staff atau rekap biaya complimentary."
-          action={
-            <input
-              className="monthInput"
-              type="month"
-              value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-            />
-          }
+          subtitle="Rekap VIP complimentary per shift untuk input Majoo 1x per shift."
+          action={<input className="monthInput" type="date" value={date} onChange={(event) => setDate(event.target.value)} />}
         />
         <div className="filterBar">
           <button onClick={() => setReportMode('checklist')}>
@@ -2667,7 +2939,7 @@ function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (p
             VIP Rekap
           </button>
         </div>
-        <VipRecapPanel sessions={store.sessions} selectedMonth={selectedMonth} />
+        <VipRecapPanel store={store} date={date} shift={selectedShift} setShift={setSelectedShift} onMarkMajoo={onMarkVipMajoo} />
       </section>
     );
   }
@@ -3058,30 +3330,70 @@ function IssuesScreen({
     </section>
   );
 }
-function VipRecapPanel({ sessions, selectedMonth }: { sessions: VipSession[]; selectedMonth: string }) {
-  const monthlySessions = useMemo(
-    () => sessions.filter((session) => session.date.slice(0, 7) === selectedMonth),
-    [sessions, selectedMonth],
-  );
-  const recap = useMemo(() => buildVipRecap(monthlySessions), [monthlySessions]);
+function VipRecapPanel({
+  store,
+  date,
+  shift,
+  setShift,
+  onMarkMajoo,
+}: {
+  store: AppStore;
+  date: string;
+  shift: ShiftNumber;
+  setShift: (shift: ShiftNumber) => void;
+  onMarkMajoo: (date: string, shift: ShiftNumber, cashierStaffId: string) => void;
+}) {
+  const shiftSessions = useMemo(() => store.sessions.filter((session) => session.date === date && session.shift === shift), [date, shift, store.sessions]);
+  const recap = useMemo(() => buildVipRecap(shiftSessions), [shiftSessions]);
+  const majooRecap = store.majooRecaps.find((item) => item.date === date && item.shift === shift);
+  const cashierStaffId = shiftSessions[0]?.cashierStaffId || store.staff.find((person) => person.isActive)?.staffId || '';
+  const cashier = store.staff.find((person) => person.staffId === cashierStaffId);
 
   return (
     <>
+      <div className="panel filterGrid">
+        <Field label="Shift">
+          <select value={shift} onChange={(event) => setShift(normalizeShiftNumber(event.target.value))}>
+            {store.shifts.map((item) => (
+              <option value={item.shift} key={item.shift}>
+                {shiftLabel(store.shifts, item.shift)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="syncInfoBox">
+          <span>Kasir Shift</span>
+          <strong>{cashier?.staffName || shiftSessions[0]?.staffName || '-'}</strong>
+          <p>{shiftLabel(store.shifts, shift)}</p>
+        </div>
+      </div>
+
       <div className="metricGrid">
-        <Metric label="Sesi VIP" value={recap.sessionCount.toLocaleString('id-ID')} tone="green" />
+        <Metric label="Sesi Selesai" value={recap.sessionCount.toLocaleString('id-ID')} tone="green" />
         <Metric label="Total Biaya" value={rupiah(recap.totalCost)} tone="gold" />
         <Metric label="Qty Terpakai" value={recap.totalUsed.toLocaleString('id-ID')} tone="green" />
-        <Metric label="Belum Majoo" value={recap.notMajoo.toLocaleString('id-ID')} tone="red" />
+        <Metric label="Status Majoo" value={majooRecap?.statusMajoo === 'done' ? 'Done' : 'Pending'} tone={majooRecap?.statusMajoo === 'done' ? 'green' : 'red'} />
       </div>
 
       <div className="panel highlightPanel">
         <div>
-          <span className="eyebrow">Paling Sering Terpakai</span>
-          <strong>{recap.mostUsedItem || '-'}</strong>
+          <span className="eyebrow">Input Majoo</span>
+          <strong>Complimentary VIP - Shift {shift}</strong>
         </div>
         <div>
-          <span className="eyebrow">Rata-rata Aqua / Sesi</span>
-          <strong>{recap.avgAqua.toFixed(1)}</strong>
+          <span className="eyebrow">Status Shift Hari Ini</span>
+          <strong>
+            {store.shifts
+              .map((item) => {
+                const status = store.majooRecaps.some((recapItem) => recapItem.date === date && recapItem.shift === item.shift && recapItem.statusMajoo === 'done')
+                  ? 'done'
+                  : store.sessions.some((session) => session.date === date && session.shift === item.shift)
+                    ? 'pending'
+                    : 'belum';
+                return `${item.shift}:${status}`;
+              })
+              .join(' / ')}
+          </strong>
         </div>
       </div>
 
@@ -3098,11 +3410,21 @@ function VipRecapPanel({ sessions, selectedMonth }: { sessions: VipSession[]; se
             </div>
             <div className="right">
               <strong>{rupiah(row.totalCost)}</strong>
-              <span>{row.avgPerSession.toFixed(1)} / sesi</span>
+              <span>input Majoo qty {row.totalUsed}</span>
             </div>
           </div>
         ))}
-        {!recap.itemRows.length && <EmptyState title="Belum ada rekap" body="Simpan sesi VIP untuk melihat ringkasan bulanan." />}
+        {!recap.itemRows.length && <EmptyState title="Belum ada rekap" body="Sesi VIP yang selesai pada shift ini akan muncul di sini." />}
+      </div>
+
+      <div className="stickyActions">
+        <button
+          className="primaryBtn"
+          onClick={() => onMarkMajoo(date, shift, cashierStaffId)}
+          disabled={!shiftSessions.length || majooRecap?.statusMajoo === 'done'}
+        >
+          <Check size={16} /> {majooRecap?.statusMajoo === 'done' ? 'Sudah input Majoo' : 'Tandai sudah input Majoo'}
+        </button>
       </div>
     </>
   );
@@ -3202,7 +3524,7 @@ function MasterScreen({
   onPushToRemote: () => void;
   onPullFromRemote: () => void;
 }) {
-  const [section, setSection] = useState<'staff' | 'roles' | 'templates' | 'vip' | 'sync'>('staff');
+  const [section, setSection] = useState<'staff' | 'roles' | 'templates' | 'vip' | 'shifts' | 'sync'>('staff');
   const [draft, setDraft] = useState<AppStore>(() => store);
   const [masterDirty, setMasterDirty] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState(store.checklistTemplates[0]?.templateId || '');
@@ -3348,6 +3670,7 @@ function MasterScreen({
           ['roles', 'Roles'],
           ['templates', 'Templates'],
           ['vip', 'VIP Items'],
+          ['shifts', 'Shifts'],
           ['sync', 'Sync'],
         ].map(([key, label]) => (
           <button className={section === key ? 'active' : ''} onClick={() => setSection(key as typeof section)} key={key}>
@@ -3668,7 +3991,10 @@ function MasterScreen({
               onClick={() =>
                 updateDraft((current) => ({
                   ...current,
-                  items: [...current.items, { id: uid(), name: 'Item Baru', category: 'Minuman', hpp: 0, defaultQty: 1, active: true }],
+                  items: [
+                    ...current.items,
+                    { id: uid(), name: 'Item Baru', category: 'Minuman', unit: 'botol', hpp: 0, defaultQty: 1, isDraft: false, active: true },
+                  ],
                 }))
               }
             >
@@ -3685,6 +4011,7 @@ function MasterScreen({
                   <input value={item.name} onChange={(event) => patchVipItem(updateDraft, item.id, { name: event.target.value })} />
                   <div className="triple">
                     <input value={item.category} onChange={(event) => patchVipItem(updateDraft, item.id, { category: event.target.value })} />
+                    <input value={item.unit} onChange={(event) => patchVipItem(updateDraft, item.id, { unit: event.target.value })} />
                     <input inputMode="numeric" value={item.hpp} onChange={(event) => patchVipItem(updateDraft, item.id, { hpp: Number(event.target.value) })} />
                     <input
                       inputMode="numeric"
@@ -3692,6 +4019,10 @@ function MasterScreen({
                       onChange={(event) => patchVipItem(updateDraft, item.id, { defaultQty: Number(event.target.value) })}
                     />
                   </div>
+                  <label className="checkLine masterCheck">
+                    <input type="checkbox" checked={item.isDraft} onChange={(event) => patchVipItem(updateDraft, item.id, { isDraft: event.target.checked })} />
+                    Muncul otomatis di draft
+                  </label>
                 </div>
                 <div className="cardActions">
                   <Toggle checked={item.active} onChange={() => patchVipItem(updateDraft, item.id, { active: !item.active })} />
@@ -3699,6 +4030,32 @@ function MasterScreen({
                     <Trash2 size={15} />
                   </button>
                 </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+
+      {section === 'shifts' && (
+        <>
+          <div className="sectionHeader">
+            <h2>Shift Schedule</h2>
+          </div>
+          <div className="stack tight">
+            {draft.shifts.map((shift) => (
+              <article className="masterRow" key={shift.shift}>
+                <div className="rowIcon">
+                  <Clock size={17} />
+                </div>
+                <div className="masterFields">
+                  <input value={shift.label} onChange={(event) => patchShift(updateDraft, shift.shift, { label: event.target.value })} />
+                  <div className="triple">
+                    <input type="time" value={shift.startTime} onChange={(event) => patchShift(updateDraft, shift.shift, { startTime: event.target.value })} />
+                    <input type="time" value={shift.endTime} onChange={(event) => patchShift(updateDraft, shift.shift, { endTime: event.target.value })} />
+                    <span className="syncStatus muted">Auto dari jam checkout</span>
+                  </div>
+                </div>
+                <Toggle checked={shift.isActive} onChange={() => patchShift(updateDraft, shift.shift, { isActive: !shift.isActive })} />
               </article>
             ))}
           </div>
@@ -3967,8 +4324,14 @@ function validateVipForm(form: VipForm) {
   const errors: string[] = [];
   if (!form.date) errors.push('Tanggal wajib diisi.');
   if (!form.bookingName.trim()) errors.push('Nama booking wajib diisi.');
-  if (!form.staffName.trim()) errors.push('Staff wajib dipilih.');
+  if (!form.cashierStaffId && !form.staffName.trim()) errors.push('Kasir wajib dipilih.');
   if (!form.items.length) errors.push('Minimal satu item complimentary.');
+  const seen = new Set<string>();
+  form.items.forEach((item) => {
+    if (seen.has(item.itemId)) errors.push(`${item.itemName}: item dobel dalam sesi.`);
+    seen.add(item.itemId);
+    if (item.sealedLeftQty > item.preparedQty) errors.push(`${item.itemName}: sisa segel tidak boleh lebih besar dari par.`);
+  });
   return errors;
 }
 
@@ -3993,6 +4356,23 @@ function patchVipItem(setStore: (updater: React.SetStateAction<AppStore>) => voi
             ...patch,
             hpp: patch.hpp === undefined ? item.hpp : Math.max(0, Number(patch.hpp) || 0),
             defaultQty: patch.defaultQty === undefined ? item.defaultQty : Math.max(0, Math.trunc(Number(patch.defaultQty) || 0)),
+          }
+        : item,
+    ),
+  }));
+}
+
+function patchShift(setStore: (updater: React.SetStateAction<AppStore>) => void, shift: ShiftNumber, patch: Partial<ShiftSetting>) {
+  setStore((current) => ({
+    ...current,
+    shifts: current.shifts.map((item) =>
+      item.shift === shift
+        ? {
+            ...item,
+            ...patch,
+            shift,
+            startTime: patch.startTime === undefined ? item.startTime : normalizeTime(patch.startTime, item.startTime),
+            endTime: patch.endTime === undefined ? item.endTime : normalizeTime(patch.endTime, item.endTime),
           }
         : item,
     ),
@@ -4194,17 +4574,16 @@ function exportVipCsv(sessions: VipSession[], includeFinancials = false) {
   const rows = sessions.flatMap((session) =>
     session.items.map((item) => ({
       date: session.date,
+      shift: session.shift,
       startTime: session.startTime,
       endTime: session.endTime,
       bookingName: session.bookingName,
-      room: session.room,
-      staffName: session.staffName,
+      cashierName: session.staffName,
       itemName: item.itemName,
-      preparedQty: item.preparedQty,
+      par: item.preparedQty,
       sealedLeftQty: item.sealedLeftQty,
       usedQty: item.usedQty,
       ...(includeFinancials ? { totalCost: item.totalCost } : {}),
-      majooInputDone: item.majooInputDone ? 'Yes' : 'No',
       notes: session.notes || '',
     })),
   );

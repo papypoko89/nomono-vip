@@ -18,12 +18,14 @@ http://127.0.0.1:5173
 ## Features
 
 - Input sesi VIP dengan multi item.
-- Auto calculate terpakai, balik stok, dan total biaya.
+- VIP Log memakai model par-stock/top-up: Par - Sisa Segel = Terpakai = Top-up.
+- Shift 1/2/3 otomatis dari jam checkout, dengan jam shift bisa diatur di Master.
 - Validasi qty minus, qty bulat, dan sisa segel tidak boleh lebih besar dari qty disiapkan.
-- Checklist Majoo per item.
+- Rekap Majoo per shift, bukan checklist Majoo per item.
 - Log harian dengan filter hari ini, bulan ini, custom date, dan belum input Majoo.
 - Rekap bulanan, total biaya, item paling sering terpakai, rata-rata Aqua per sesi.
 - Master item, HPP, default qty, status aktif/nonaktif.
+- Master shift untuk mengatur jam Shift 1/2/3.
 - Master staff, role, template checklist, dan item checklist.
 - Report checklist dengan detail item dan foto bukti.
 - Issue tracking dari item checklist yang bermasalah.
@@ -44,7 +46,7 @@ http://127.0.0.1:5173
 4. Di Vercel, isi `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY`.
 5. Deploy app.
 
-Data utama aplikasi disimpan di tabel relational `nomono_*`. Tabel `nomono_app_state` masih dipertahankan sebagai backup legacy sementara selama transisi.
+Data utama aplikasi disimpan di tabel relational `nomono_*`, termasuk shift setting dan Majoo recap per shift. Tabel `nomono_app_state` masih dipertahankan sebagai backup legacy sementara selama transisi.
 Foto bukti disimpan di bucket Supabase Storage `nomono-checklist-photos`.
 
 File `google-apps-script/VipComplimentaryLog.gs` masih disimpan sebagai arsip backend lama, tetapi app saat ini menggunakan Supabase.

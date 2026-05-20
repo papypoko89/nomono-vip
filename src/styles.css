@@ -630,10 +630,18 @@ textarea:focus {
 
 .itemTop {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 30px 1fr auto;
   align-items: center;
   gap: 9px;
   margin-bottom: 12px;
+}
+
+.itemTopFields {
+  min-width: 0;
+}
+
+.itemTopFields .field {
+  margin: 0;
 }
 
 .itemNumber,
@@ -666,7 +674,7 @@ textarea:focus {
 
 .calcRow {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
   align-items: center;
   gap: 10px;
   margin-top: 11px;
@@ -1359,7 +1367,7 @@ textarea:focus {
 
 .triple {
   display: grid;
-  grid-template-columns: 1fr 92px 74px;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
   gap: 7px;
 }
 
