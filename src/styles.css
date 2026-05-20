@@ -76,6 +76,13 @@ svg {
   box-shadow: 0 1px 0 #00000015;
 }
 
+.topbarStatus {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .brand {
   font-size: 16px;
   font-weight: 700;
@@ -374,7 +381,8 @@ textarea:focus {
 .statusBadge,
 .itemStatus,
 .issueStatus,
-.priorityBadge {
+.priorityBadge,
+.modePill {
   width: fit-content;
   border-radius: 999px;
   padding: 6px 9px;
@@ -388,6 +396,18 @@ textarea:focus {
   border: 1px solid #e0dbbc33;
   color: var(--cream);
   text-align: center;
+}
+
+.modePill {
+  border: 1px solid #e0dbbc33;
+  background: #e0dbbc14;
+  color: var(--cream);
+}
+
+.modePill.manager {
+  border-color: #c39a4b66;
+  background: #c39a4b22;
+  color: var(--gold);
 }
 
 .statusPill.warn {
@@ -1387,7 +1407,7 @@ textarea:focus {
   left: 0;
   z-index: 35;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
   border-top: 1px solid var(--line);
   background: #fafaf7f2;
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));

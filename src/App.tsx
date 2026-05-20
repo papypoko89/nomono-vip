@@ -417,6 +417,8 @@ const rupiah = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value);
 
+const isManagerLevel = (permissionLevel?: PermissionLevel) => permissionLevel === 'Manager' || permissionLevel === 'Supervisor';
+
 const emptyStore = (): AppStore => ({
   items: DEFAULT_ITEMS,
   staff: DEFAULT_STAFF,
@@ -968,6 +970,14 @@ function App() {
   };
 
   const selectedStaff = store.staff.find((person) => person.staffId === selectedStaffId) || store.staff.find((person) => person.isActive);
+  const hasManagerStaff = store.staff.some((person) => isManagerLevel(person.permissionLevel));
+  const managerMode = hasManagerStaff ? isManagerLevel(selectedStaff?.permissionLevel) : true;
+
+  useEffect(() => {
+    if (!managerMode && (tab === 'report' || tab === 'master')) {
+      setTab('checklist');
+    }
+  }, [managerMode, tab]);
 
   const saveVipSession = () => {
     const errors = validateVipForm(vipForm);
@@ -1283,7 +1293,10 @@ function App() {
           <div className="brand">NOMONO</div>
           <div className="brandSub">VIP Log + Staff SOP Checklist</div>
         </div>
-        <StatusPill store={store} />
+        <div className="topbarStatus">
+          <ModePill managerMode={managerMode} />
+          <StatusPill store={store} />
+        </div>
       </header>
 
       <main className="content">
@@ -1293,6 +1306,7 @@ function App() {
             setForm={setVipForm}
             editing={Boolean(vipEditingId)}
             store={store}
+            canSeeFinancials={managerMode}
             onSave={saveVipSession}
             onLineChange={patchVipLine}
             onEdit={(session) => {
@@ -1332,19 +1346,20 @@ function App() {
           />
         )}
 
-        {tab === 'report' && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
+        {tab === 'report' && managerMode && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
 
         {tab === 'issues' && (
           <IssuesScreen
             store={store}
             selectedStaff={selectedStaff}
+            canManageIssues={managerMode}
             onUpdateIssue={updateIssue}
             onAddComment={addIssueComment}
             onOpenPhoto={setPhotoViewer}
           />
         )}
 
-        {tab === 'master' && (
+        {tab === 'master' && managerMode && (
           <MasterScreen
             store={store}
             syncStatus={syncStatus}
@@ -1359,9 +1374,9 @@ function App() {
       <nav className="bottomNav">
         <NavButton icon={<ClipboardList />} label="VIP Log" active={tab === 'vip'} onClick={() => setTab('vip')} />
         <NavButton icon={<ClipboardCheck />} label="Checklist" active={tab === 'checklist'} onClick={() => setTab('checklist')} />
-        <NavButton icon={<BarChart3 />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />
+        {managerMode && <NavButton icon={<BarChart3 />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />}
         <NavButton icon={<MessageSquare />} label="Issues" active={tab === 'issues'} onClick={() => setTab('issues')} />
-        <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />
+        {managerMode && <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />}
       </nav>
       <Toast toast={toast} />
       <PhotoLightbox photo={photoViewer} onClose={() => setPhotoViewer(null)} />
@@ -1374,6 +1389,7 @@ function VipLogScreen({
   setForm,
   editing,
   store,
+  canSeeFinancials,
   onSave,
   onLineChange,
   onEdit,
@@ -1384,6 +1400,7 @@ function VipLogScreen({
   setForm: React.Dispatch<React.SetStateAction<VipForm>>;
   editing: boolean;
   store: AppStore;
+  canSeeFinancials: boolean;
   onSave: () => void;
   onLineChange: (lineId: string, patch: Partial<VipSessionItem>) => void;
   onEdit: (session: VipSession) => void;
@@ -1393,6 +1410,7 @@ function VipLogScreen({
   const activeStaff = store.staff.filter((person) => person.isActive);
   const totals = getVipTotals(form.items);
   const todaySessions = store.sessions.filter((session) => session.date === todayISO());
+  const majooPending = form.items.filter((item) => item.usedQty > 0 && !item.majooInputDone).length;
 
   return (
     <section className="stack">
@@ -1442,7 +1460,11 @@ function VipLogScreen({
       <div className="metricGrid">
         <Metric label="Item Terpakai" value={String(totals.usedQty)} tone="green" />
         <Metric label="Return Stock" value={String(totals.returnQty)} tone="gold" />
-        <Metric label="Total HPP" value={rupiah(totals.totalCost)} tone="green" />
+        {canSeeFinancials ? (
+          <Metric label="Total HPP" value={rupiah(totals.totalCost)} tone="green" />
+        ) : (
+          <Metric label="Majoo Pending" value={String(majooPending)} tone="red" />
+        )}
         <Metric label="Log Hari Ini" value={String(todaySessions.length)} tone="red" />
       </div>
 
@@ -1456,7 +1478,7 @@ function VipLogScreen({
               <div className="itemNumber">{index + 1}</div>
               <div>
                 <strong>{line.itemName}</strong>
-                <span>{rupiah(line.hpp)} / item</span>
+                <span>{canSeeFinancials ? `${rupiah(line.hpp)} / item` : 'Item complimentary'}</span>
               </div>
             </div>
             <div className="qtyGrid">
@@ -1480,10 +1502,12 @@ function VipLogScreen({
                 <span>Terpakai</span>
                 <strong>{line.usedQty}</strong>
               </div>
-              <div>
-                <span>HPP</span>
-                <strong>{rupiah(line.totalCost)}</strong>
-              </div>
+              {canSeeFinancials && (
+                <div>
+                  <span>HPP</span>
+                  <strong>{rupiah(line.totalCost)}</strong>
+                </div>
+              )}
               <label className="checkLine">
                 <input
                   type="checkbox"
@@ -1505,9 +1529,11 @@ function VipLogScreen({
 
       <div className="sectionHeader">
         <h2>Log Terbaru</h2>
-        <button className="accentBtn" onClick={() => exportVipCsv(store.sessions)} disabled={!store.sessions.length}>
-          <Download size={15} /> CSV
-        </button>
+        {canSeeFinancials && (
+          <button className="accentBtn" onClick={() => exportVipCsv(store.sessions)} disabled={!store.sessions.length}>
+            <Download size={15} /> CSV
+          </button>
+        )}
       </div>
       <div className="stack tight">
         {store.sessions.slice(0, 12).map((session) => (
@@ -1531,7 +1557,7 @@ function VipLogScreen({
             </div>
             <div className="logTotals">
               <span>{getVipTotals(session.items).usedQty} item terpakai</span>
-              <strong>{rupiah(getVipTotals(session.items).totalCost)}</strong>
+              {canSeeFinancials && <strong>{rupiah(getVipTotals(session.items).totalCost)}</strong>}
             </div>
           </article>
         ))}
@@ -2051,12 +2077,14 @@ function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (p
 function IssuesScreen({
   store,
   selectedStaff,
+  canManageIssues,
   onUpdateIssue,
   onAddComment,
   onOpenPhoto,
 }: {
   store: AppStore;
   selectedStaff?: Staff;
+  canManageIssues: boolean;
   onUpdateIssue: (issueId: string, patch: Partial<Issue>) => void;
   onAddComment: (issueId: string, comment: string) => void;
   onOpenPhoto: (photo: PhotoViewer) => void;
@@ -2067,7 +2095,7 @@ function IssuesScreen({
   const [staffName, setStaffName] = useState('all');
   const [openIssueId, setOpenIssueId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
-  const isManagerView = selectedStaff?.permissionLevel !== 'Staff';
+  const isManagerView = canManageIssues;
 
   const visibleIssues = useMemo(() => store.issues.filter((issue) => issue.status !== 'closed'), [store.issues]);
   const filteredIssues = useMemo(
@@ -3050,6 +3078,10 @@ function NavButton({
       <span>{label}</span>
     </button>
   );
+}
+
+function ModePill({ managerMode }: { managerMode: boolean }) {
+  return <div className={`modePill ${managerMode ? 'manager' : ''}`}>{managerMode ? 'Manager' : 'Staff'}</div>;
 }
 
 function StatusPill({ store }: { store: AppStore }) {
