@@ -3348,10 +3348,29 @@ function VipRecapPanel({
   const majooRecap = store.majooRecaps.find((item) => item.date === date && item.shift === shift);
   const cashierStaffId = shiftSessions[0]?.cashierStaffId || store.staff.find((person) => person.isActive)?.staffId || '';
   const cashier = store.staff.find((person) => person.staffId === cashierStaffId);
+  const isMajooDone = majooRecap?.statusMajoo === 'done';
+  const statusRows = store.shifts.map((item) => {
+    const done = store.majooRecaps.some((recapItem) => recapItem.date === date && recapItem.shift === item.shift && recapItem.statusMajoo === 'done');
+    const hasSessions = store.sessions.some((session) => session.date === date && session.shift === item.shift);
+    return {
+      shift: item.shift,
+      label: item.label,
+      status: done ? 'done' : hasSessions ? 'pending' : 'empty',
+    };
+  });
 
   return (
     <>
-      <div className="panel filterGrid">
+      <div className="vipRecapHero">
+        <div>
+          <span className="eyebrow">VIP Shift Recap</span>
+          <strong>Shift {shift} - {niceDate(date)}</strong>
+          <p>{shiftLabel(store.shifts, shift)}</p>
+        </div>
+        <span className={`majooBadge ${isMajooDone ? 'done' : 'pending'}`}>{isMajooDone ? 'Majoo Done' : 'Majoo Pending'}</span>
+      </div>
+
+      <div className="vipRecapToolbar">
         <Field label="Shift">
           <select value={shift} onChange={(event) => setShift(normalizeShiftNumber(event.target.value))}>
             {store.shifts.map((item) => (
@@ -3361,10 +3380,10 @@ function VipRecapPanel({
             ))}
           </select>
         </Field>
-        <div className="syncInfoBox">
-          <span>Kasir Shift</span>
+        <div className="cashierStrip">
+          <span>Kasir</span>
           <strong>{cashier?.staffName || shiftSessions[0]?.staffName || '-'}</strong>
-          <p>{shiftLabel(store.shifts, shift)}</p>
+          <em>{shiftSessions.length} sesi</em>
         </div>
       </div>
 
@@ -3375,25 +3394,18 @@ function VipRecapPanel({
         <Metric label="Status Majoo" value={majooRecap?.statusMajoo === 'done' ? 'Done' : 'Pending'} tone={majooRecap?.statusMajoo === 'done' ? 'green' : 'red'} />
       </div>
 
-      <div className="panel highlightPanel">
+      <div className="majooCard">
         <div>
           <span className="eyebrow">Input Majoo</span>
           <strong>Complimentary VIP - Shift {shift}</strong>
+          <p>Masukkan semua item di bawah sebagai 1 transaksi Rp 0.</p>
         </div>
-        <div>
-          <span className="eyebrow">Status Shift Hari Ini</span>
-          <strong>
-            {store.shifts
-              .map((item) => {
-                const status = store.majooRecaps.some((recapItem) => recapItem.date === date && recapItem.shift === item.shift && recapItem.statusMajoo === 'done')
-                  ? 'done'
-                  : store.sessions.some((session) => session.date === date && session.shift === item.shift)
-                    ? 'pending'
-                    : 'belum';
-                return `${item.shift}:${status}`;
-              })
-              .join(' / ')}
-          </strong>
+        <div className="shiftStatusGroup" aria-label="Status shift hari ini">
+          {statusRows.map((row) => (
+            <span className={`shiftStatusChip ${row.status}`} key={row.shift}>
+              {row.label.replace('Shift ', 'S')} <strong>{row.status === 'done' ? 'Done' : row.status === 'pending' ? 'Pending' : 'Belum'}</strong>
+            </span>
+          ))}
         </div>
       </div>
 
@@ -3406,11 +3418,11 @@ function VipRecapPanel({
           <div className="itemSummary" key={row.itemName}>
             <div>
               <strong>{row.itemName}</strong>
-              <span>{row.totalUsed} terpakai</span>
+              <span>{row.totalUsed} terpakai dari {recap.sessionCount} sesi</span>
             </div>
             <div className="right">
               <strong>{rupiah(row.totalCost)}</strong>
-              <span>input Majoo qty {row.totalUsed}</span>
+              <span className="qtyBadge">Majoo qty {row.totalUsed}</span>
             </div>
           </div>
         ))}
@@ -3425,6 +3437,9 @@ function VipRecapPanel({
         >
           <Check size={16} /> {majooRecap?.statusMajoo === 'done' ? 'Sudah input Majoo' : 'Tandai sudah input Majoo'}
         </button>
+        {isMajooDone && majooRecap.recapAt && (
+          <p className="recapLockText">Dikunci {new Date(majooRecap.recapAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+        )}
       </div>
     </>
   );

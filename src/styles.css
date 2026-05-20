@@ -346,6 +346,168 @@ textarea:focus {
   color: var(--gold);
 }
 
+.vipRecapHero,
+.vipRecapToolbar,
+.majooCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff70;
+}
+
+.vipRecapHero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px;
+}
+
+.vipRecapHero strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--green);
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.vipRecapHero p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.majooBadge,
+.shiftStatusChip,
+.qtyBadge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.majooBadge {
+  padding: 7px 10px;
+}
+
+.majooBadge.done,
+.shiftStatusChip.done {
+  background: var(--green);
+  color: var(--cream);
+}
+
+.majooBadge.pending,
+.shiftStatusChip.pending {
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+.shiftStatusChip.empty {
+  background: #231f2010;
+  color: var(--muted);
+}
+
+.vipRecapToolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+}
+
+.cashierStrip {
+  min-width: 128px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 9px 10px;
+}
+
+.cashierStrip span,
+.cashierStrip em {
+  display: block;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.cashierStrip strong {
+  display: block;
+  margin: 3px 0;
+  color: var(--green);
+  font-size: 15px;
+}
+
+.majooCard {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  background: var(--green);
+}
+
+.majooCard .eyebrow,
+.majooCard p {
+  color: var(--gold);
+}
+
+.majooCard strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--cream);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.majooCard p {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.shiftStatusGroup {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.shiftStatusChip {
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 6px 8px;
+}
+
+.shiftStatusChip strong {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.qtyBadge {
+  justify-content: center;
+  margin-left: auto;
+  background: var(--green-soft);
+  color: var(--green) !important;
+  padding: 5px 8px;
+}
+
+.recapLockText {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .livePanel {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1555,6 +1717,11 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
     align-items: end;
   }
+
+  .majooCard {
+    grid-template-columns: 1.1fr 1fr;
+    align-items: center;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1576,8 +1743,22 @@ textarea:focus {
   .issueMetaGrid,
   .dashboardRow,
   .dashboardIssue,
-  .livePanel {
+  .livePanel,
+  .vipRecapToolbar,
+  .itemSummary {
     grid-template-columns: 1fr;
+  }
+
+  .vipRecapHero {
+    display: grid;
+  }
+
+  .itemSummary .right {
+    text-align: left;
+  }
+
+  .qtyBadge {
+    margin-left: 0;
   }
 
   .calcRow,
