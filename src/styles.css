@@ -744,6 +744,15 @@ textarea:focus {
   gap: 10px;
 }
 
+.photoPreviewButton,
+.thumbLink,
+.reportPhotoProof {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
 .photoBox img,
 .thumbLink img {
   display: block;
@@ -753,6 +762,11 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff80;
+}
+
+.photoPreviewButton {
+  display: block;
+  width: 100%;
 }
 
 .photoPlaceholder {
@@ -874,6 +888,81 @@ textarea:focus {
 
 .thumbLink img {
   height: 90px;
+}
+
+.lightboxBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.lightboxScrim {
+  position: absolute;
+  inset: 0;
+  background: #231f2075;
+  backdrop-filter: blur(5px);
+}
+
+.lightboxPanel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+  width: min(680px, 100%);
+  max-height: min(780px, calc(100vh - 36px));
+  overflow: auto;
+  border: 1px solid #ffffff45;
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 12px;
+  box-shadow: 0 24px 80px #00000038;
+  animation: lightboxIn 180ms ease both;
+}
+
+.lightboxHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lightboxHead strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.lightboxImage {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #ffffff80;
+}
+
+.lightboxNote {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@keyframes lightboxIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .filterBar {

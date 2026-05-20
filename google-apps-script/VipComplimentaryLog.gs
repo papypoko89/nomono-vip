@@ -501,7 +501,7 @@ function savePhoto_(payload) {
 
   const fileId = file.getId();
   const fileUrl = file.getUrl();
-  const thumbnailUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+  const thumbnailUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
   const uploadedAt = new Date().toISOString();
 
   return {

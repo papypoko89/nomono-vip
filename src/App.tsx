@@ -177,6 +177,13 @@ type ToastMessage = {
   tone: 'success' | 'info' | 'warning';
 };
 
+type PhotoViewer = {
+  title: string;
+  src: string;
+  href: string;
+  note?: string;
+};
+
 type AppStore = {
   items: VipItem[];
   staff: Staff[];
@@ -729,6 +736,7 @@ function App() {
   const [selectedStaffId, setSelectedStaffId] = useState(() => localStorage.getItem('nomono.selectedStaffId') || '');
   const [syncStatus, setSyncStatus] = useState('Google Sheet siap disambungkan.');
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewer | null>(null);
   const skipAutoSyncRef = useRef(false);
   const pendingLocalSyncRef = useRef(false);
   const remoteReadyRef = useRef(false);
@@ -1148,10 +1156,11 @@ function App() {
             onMarkItem={markRunItem}
             onSubmitRun={submitRun}
             onPhoto={handlePhoto}
+            onOpenPhoto={setPhotoViewer}
           />
         )}
 
-        {tab === 'report' && <ReportScreen store={store} />}
+        {tab === 'report' && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
 
         {tab === 'master' && (
           <MasterScreen
@@ -1172,6 +1181,7 @@ function App() {
         <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />
       </nav>
       <Toast toast={toast} />
+      <PhotoLightbox photo={photoViewer} onClose={() => setPhotoViewer(null)} />
     </div>
   );
 }
@@ -1358,6 +1368,7 @@ function ChecklistScreen({
   onMarkItem,
   onSubmitRun,
   onPhoto,
+  onOpenPhoto,
 }: {
   store: AppStore;
   selectedStaff?: Staff;
@@ -1368,6 +1379,7 @@ function ChecklistScreen({
   onMarkItem: (runItemId: string, status: 'done' | 'issue') => void;
   onSubmitRun: (runId: string) => void;
   onPhoto: (run: ChecklistRun, item: ChecklistRunItem, file: File) => void;
+  onOpenPhoto: (photo: PhotoViewer) => void;
 }) {
   const [activeRunType, setActiveRunType] = useState<'opening' | 'closing'>('opening');
   const today = todayISO();
@@ -1467,6 +1479,7 @@ function ChecklistScreen({
               onMarkItem={onMarkItem}
               onSubmitRun={onSubmitRun}
               onPhoto={onPhoto}
+              onOpenPhoto={onOpenPhoto}
             />
           ) : (
             <EmptyState
@@ -1555,6 +1568,7 @@ function RunDetail({
   onMarkItem,
   onSubmitRun,
   onPhoto,
+  onOpenPhoto,
 }: {
   run: ChecklistRun;
   items: ChecklistRunItem[];
@@ -1562,6 +1576,7 @@ function RunDetail({
   onMarkItem: (runItemId: string, status: 'done' | 'issue') => void;
   onSubmitRun: (runId: string) => void;
   onPhoto: (run: ChecklistRun, item: ChecklistRunItem, file: File) => void;
+  onOpenPhoto: (photo: PhotoViewer) => void;
 }) {
   const completed = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
   const canSubmit = items.length > 0 && completed === items.length && run.status === 'in_progress';
@@ -1599,9 +1614,19 @@ function RunDetail({
             {(item.photoRequired || item.photoThumbnailUrl || item.photoDataUrl) && (
               <div className="photoBox">
                 {item.photoThumbnailUrl || item.photoDataUrl ? (
-                  <a href={item.photoUrl || item.photoDataUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
-                    <img src={item.photoThumbnailUrl || item.photoDataUrl} alt={`Foto ${item.itemName}`} />
-                  </a>
+                  <button
+                    className="photoPreviewButton"
+                    onClick={() =>
+                      onOpenPhoto({
+                        title: item.itemName,
+                        src: photoPreviewSrc(item),
+                        href: photoFullUrl(item),
+                        note: item.note,
+                      })
+                    }
+                  >
+                    <img src={photoPreviewSrc(item)} alt={`Foto ${item.itemName}`} />
+                  </button>
                 ) : (
                   <div className="photoPlaceholder">
                     <Image size={20} />
@@ -1656,7 +1681,7 @@ function RunDetail({
   );
 }
 
-function ReportScreen({ store }: { store: AppStore }) {
+function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (photo: PhotoViewer) => void }) {
   const [reportMode, setReportMode] = useState<'checklist' | 'vip'>('checklist');
   const [date, setDate] = useState(todayISO());
   const [selectedMonth, setSelectedMonth] = useState(todayISO().slice(0, 7));
@@ -1791,7 +1816,12 @@ function ReportScreen({ store }: { store: AppStore }) {
       </div>
       <div className="stack tight">
         {filteredRuns.map((run) => (
-          <RunReportCard key={run.runId} run={run} items={store.checklistRunItems.filter((item) => item.runId === run.runId)} />
+          <RunReportCard
+            key={run.runId}
+            run={run}
+            items={store.checklistRunItems.filter((item) => item.runId === run.runId)}
+            onOpenPhoto={onOpenPhoto}
+          />
         ))}
         {!filteredRuns.length && <EmptyState title="Belum ada checklist" body="Run yang sesuai filter akan muncul di sini." />}
       </div>
@@ -1812,9 +1842,19 @@ function ReportScreen({ store }: { store: AppStore }) {
                 <p>{item.note || 'Belum ada catatan.'}</p>
               </div>
               {(item.photoThumbnailUrl || item.photoUrl) && (
-                <a className="thumbLink" href={item.photoUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
-                  <img src={item.photoThumbnailUrl || item.photoUrl} alt={`Foto ${item.itemName}`} />
-                </a>
+                <button
+                  className="thumbLink"
+                  onClick={() =>
+                    onOpenPhoto({
+                      title: item.itemName,
+                      src: photoPreviewSrc(item),
+                      href: photoFullUrl(item),
+                      note: item.note,
+                    })
+                  }
+                >
+                  <img src={photoPreviewSrc(item)} alt={`Foto ${item.itemName}`} />
+                </button>
               )}
             </article>
           );
@@ -1875,7 +1915,15 @@ function VipRecapPanel({ sessions, selectedMonth }: { sessions: VipSession[]; se
   );
 }
 
-function RunReportCard({ run, items }: { run: ChecklistRun; items: ChecklistRunItem[] }) {
+function RunReportCard({
+  run,
+  items,
+  onOpenPhoto,
+}: {
+  run: ChecklistRun;
+  items: ChecklistRunItem[];
+  onOpenPhoto: (photo: PhotoViewer) => void;
+}) {
   const done = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
   const issue = items.filter((item) => item.status === 'issue').length;
   return (
@@ -1921,10 +1969,20 @@ function RunReportCard({ run, items }: { run: ChecklistRun; items: ChecklistRunI
                 <strong>{item.itemName}</strong>
                 <span>{item.note || item.itemDescription}</span>
                 {(item.photoThumbnailUrl || item.photoUrl || item.photoDataUrl) && (
-                  <a className="reportPhotoProof" href={item.photoUrl || item.photoDataUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
-                    <img src={item.photoThumbnailUrl || item.photoDataUrl || item.photoUrl} alt={`Foto bukti ${item.itemName}`} />
+                  <button
+                    className="reportPhotoProof"
+                    onClick={() =>
+                      onOpenPhoto({
+                        title: item.itemName,
+                        src: photoPreviewSrc(item),
+                        href: photoFullUrl(item),
+                        note: item.note,
+                      })
+                    }
+                  >
+                    <img src={photoPreviewSrc(item)} alt={`Foto bukti ${item.itemName}`} />
                     <em>Lihat foto bukti</em>
-                  </a>
+                  </button>
                 )}
               </div>
               <ItemStatus status={item.status} />
@@ -2562,6 +2620,28 @@ function Toast({ toast }: { toast: ToastMessage | null }) {
   );
 }
 
+function PhotoLightbox({ photo, onClose }: { photo: PhotoViewer | null; onClose: () => void }) {
+  if (!photo) return null;
+  return (
+    <div className="lightboxBackdrop" role="dialog" aria-modal="true" aria-label="Foto bukti">
+      <button className="lightboxScrim" onClick={onClose} aria-label="Tutup foto" />
+      <div className="lightboxPanel">
+        <div className="lightboxHead">
+          <div>
+            <span className="eyebrow">Foto Bukti</span>
+            <strong>{photo.title}</strong>
+          </div>
+          <button className="iconBtn" onClick={onClose} aria-label="Tutup foto">
+            <X size={16} />
+          </button>
+        </div>
+        <img className="lightboxImage" src={photo.src} alt={`Foto bukti ${photo.title}`} />
+        {photo.note && <p className="lightboxNote">{photo.note}</p>}
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="emptyState">
@@ -2593,6 +2673,36 @@ function isRunSubmitted(run: ChecklistRun) {
 
 function hasLocalPhotoPayload(store: AppStore) {
   return store.checklistRunItems.some((item) => Boolean(item.photoDataUrl && !item.photoUrl));
+}
+
+function photoPreviewSrc(item: Pick<ChecklistRunItem, 'photoDataUrl' | 'photoThumbnailUrl' | 'photoUrl'>) {
+  if (item.photoDataUrl) return item.photoDataUrl;
+  const source = item.photoThumbnailUrl || item.photoUrl;
+  return driveThumbnailUrl(source) || source || '';
+}
+
+function photoFullUrl(item: Pick<ChecklistRunItem, 'photoDataUrl' | 'photoThumbnailUrl' | 'photoUrl'>) {
+  if (item.photoDataUrl) return item.photoDataUrl;
+  return driveViewUrl(item.photoUrl || item.photoThumbnailUrl) || item.photoUrl || item.photoThumbnailUrl || '';
+}
+
+function driveFileId(url?: string) {
+  if (!url) return '';
+  const byPath = url.match(/\/file\/d\/([^/?]+)/);
+  if (byPath?.[1]) return byPath[1];
+  const byQuery = url.match(/[?&]id=([^&]+)/);
+  if (byQuery?.[1]) return byQuery[1];
+  return '';
+}
+
+function driveThumbnailUrl(url?: string) {
+  const id = driveFileId(url);
+  return id ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1200` : '';
+}
+
+function driveViewUrl(url?: string) {
+  const id = driveFileId(url);
+  return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : '';
 }
 
 function delay(ms: number) {
