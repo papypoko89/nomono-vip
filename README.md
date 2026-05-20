@@ -30,6 +30,7 @@ http://127.0.0.1:5173
 - Follow up issue dengan status, priority, assignee, dan komentar.
 - Manager dashboard untuk overview checklist, open issue, dan VIP complimentary.
 - Realtime refresh dari Supabase untuk update lintas device.
+- Role-based financial view: Staff tidak melihat HPP, total biaya, rekap biaya, atau export biaya; nominal hanya tampil di Manager/Supervisor.
 - Export CSV.
 - Persistence lokal via localStorage sebagai fallback.
 - Sync database via Supabase.

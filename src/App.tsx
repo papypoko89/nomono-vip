@@ -1578,7 +1578,7 @@ function VipLogScreen({
       <div className="sectionHeader">
         <h2>Log Terbaru</h2>
         {canSeeFinancials && (
-          <button className="accentBtn" onClick={() => exportVipCsv(store.sessions)} disabled={!store.sessions.length}>
+          <button className="accentBtn" onClick={() => exportVipCsv(store.sessions, true)} disabled={!store.sessions.length}>
             <Download size={15} /> CSV
           </button>
         )}
@@ -3670,7 +3670,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function exportVipCsv(sessions: VipSession[]) {
+function exportVipCsv(sessions: VipSession[], includeFinancials = false) {
   const rows = sessions.flatMap((session) =>
     session.items.map((item) => ({
       date: session.date,
@@ -3683,7 +3683,7 @@ function exportVipCsv(sessions: VipSession[]) {
       preparedQty: item.preparedQty,
       sealedLeftQty: item.sealedLeftQty,
       usedQty: item.usedQty,
-      totalCost: item.totalCost,
+      ...(includeFinancials ? { totalCost: item.totalCost } : {}),
       majooInputDone: item.majooInputDone ? 'Yes' : 'No',
       notes: session.notes || '',
     })),
