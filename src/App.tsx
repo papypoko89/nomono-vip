@@ -26,7 +26,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SUPABASE_PHOTO_BUCKET, isSupabaseConfigured, supabase } from './supabaseClient';
 
-type Tab = 'vip' | 'checklist' | 'report' | 'issues' | 'master';
+type Tab = 'vip' | 'checklist' | 'dashboard' | 'report' | 'issues' | 'master';
+type RealtimeState = 'idle' | 'connected' | 'disconnected';
 type TemplateType = 'opening' | 'closing' | 'custom';
 type RunStatus = 'not_started' | 'in_progress' | 'completed' | 'has_issue';
 type RunItemStatus = 'pending' | 'done' | 'issue' | 'skipped';
@@ -876,12 +877,15 @@ function App() {
   const [syncStatus, setSyncStatus] = useState(
     isSupabaseConfigured ? 'Supabase siap disambungkan.' : 'Supabase env belum dikonfigurasi.',
   );
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeState>(isSupabaseConfigured ? 'idle' : 'disconnected');
+  const [lastRealtimeUpdate, setLastRealtimeUpdate] = useState('');
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [photoViewer, setPhotoViewer] = useState<PhotoViewer | null>(null);
   const skipAutoSyncRef = useRef(false);
   const pendingLocalSyncRef = useRef(false);
   const remoteReadyRef = useRef(false);
   const toastTimerRef = useRef<number | null>(null);
+  const realtimeDebounceRef = useRef<number | null>(null);
 
   const notify = (title: string, body?: string, tone: ToastMessage['tone'] = 'success') => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -964,6 +968,39 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [store]);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setRealtimeStatus('disconnected');
+      return;
+    }
+
+    const channel = supabase
+      .channel('nomono-manager-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'nomono_app_state' }, () => {
+        if (pendingLocalSyncRef.current) return;
+        if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = window.setTimeout(async () => {
+          try {
+            const remote = await readSupabaseStore();
+            skipAutoSyncRef.current = true;
+            setStore((current) => ({ ...remote, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
+            setLastRealtimeUpdate(nowIso());
+            setRealtimeStatus('connected');
+          } catch {
+            setRealtimeStatus('disconnected');
+          }
+        }, 500);
+      })
+      .subscribe((status) => {
+        setRealtimeStatus(status === 'SUBSCRIBED' ? 'connected' : 'disconnected');
+      });
+
+    return () => {
+      if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current);
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
   const updateStore = (updater: React.SetStateAction<AppStore>) => {
     pendingLocalSyncRef.current = true;
     setStore(updater);
@@ -974,7 +1011,7 @@ function App() {
   const managerMode = hasManagerStaff ? isManagerLevel(selectedStaff?.permissionLevel) : true;
 
   useEffect(() => {
-    if (!managerMode && (tab === 'report' || tab === 'master')) {
+    if (!managerMode && (tab === 'dashboard' || tab === 'report' || tab === 'master')) {
       setTab('checklist');
     }
   }, [managerMode, tab]);
@@ -1346,6 +1383,16 @@ function App() {
           />
         )}
 
+        {tab === 'dashboard' && managerMode && (
+          <DashboardScreen
+            store={store}
+            realtimeStatus={realtimeStatus}
+            lastRealtimeUpdate={lastRealtimeUpdate}
+            onOpenIssues={() => setTab('issues')}
+            onOpenReport={() => setTab('report')}
+          />
+        )}
+
         {tab === 'report' && managerMode && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
 
         {tab === 'issues' && (
@@ -1374,7 +1421,8 @@ function App() {
       <nav className="bottomNav">
         <NavButton icon={<ClipboardList />} label="VIP Log" active={tab === 'vip'} onClick={() => setTab('vip')} />
         <NavButton icon={<ClipboardCheck />} label="Checklist" active={tab === 'checklist'} onClick={() => setTab('checklist')} />
-        {managerMode && <NavButton icon={<BarChart3 />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />}
+        {managerMode && <NavButton icon={<BarChart3 />} label="Dashboard" active={tab === 'dashboard'} onClick={() => setTab('dashboard')} />}
+        {managerMode && <NavButton icon={<FileText />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />}
         <NavButton icon={<MessageSquare />} label="Issues" active={tab === 'issues'} onClick={() => setTab('issues')} />
         {managerMode && <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />}
       </nav>
@@ -1886,6 +1934,151 @@ function RunDetail({
           </button>
         </div>
       )}
+    </section>
+  );
+}
+
+function DashboardScreen({
+  store,
+  realtimeStatus,
+  lastRealtimeUpdate,
+  onOpenIssues,
+  onOpenReport,
+}: {
+  store: AppStore;
+  realtimeStatus: RealtimeState;
+  lastRealtimeUpdate: string;
+  onOpenIssues: () => void;
+  onOpenReport: () => void;
+}) {
+  const [date, setDate] = useState(todayISO());
+  const activeStaff = store.staff.filter((person) => person.isActive);
+  const dayRuns = store.checklistRuns.filter((run) => run.date === date);
+  const dayItems = store.checklistRunItems.filter((item) => dayRuns.some((run) => run.runId === item.runId));
+  const daySessions = store.sessions.filter((session) => session.date === date);
+  const openIssues = store.issues
+    .filter((issue) => issue.status === 'open' || issue.status === 'in_progress')
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const dayIssues = openIssues.filter((issue) => issue.createdAt.slice(0, 10) === date);
+  const vipTotals = getVipTotals(daySessions.flatMap((session) => session.items));
+  const majooPending = daySessions.reduce(
+    (sum, session) => sum + session.items.filter((item) => item.usedQty > 0 && !item.majooInputDone).length,
+    0,
+  );
+
+  const runCount = (type: TemplateType, status: RunStatus) => dayRuns.filter((run) => run.templateType === type && run.status === status).length;
+  const runStarted = (type: TemplateType) => new Set(dayRuns.filter((run) => run.templateType === type).map((run) => run.staffId)).size;
+  const progressFor = (run?: ChecklistRun) => {
+    const items = run ? store.checklistRunItems.filter((item) => item.runId === run.runId) : [];
+    const done = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
+    return `${done}/${items.length}`;
+  };
+  const issueCountForStaff = (staff: Staff) => openIssues.filter((issue) => issue.createdByName === staff.staffName).length;
+  const liveLabel =
+    realtimeStatus === 'connected'
+      ? 'Realtime connected'
+      : realtimeStatus === 'idle'
+        ? 'Connecting realtime'
+        : 'Showing latest saved data';
+
+  return (
+    <section className="stack">
+      <ScreenTitle
+        title="Dashboard"
+        subtitle="Monitor opening, closing, issue, dan VIP complimentary hari ini."
+        action={<input className="monthInput" type="date" value={date} onChange={(event) => setDate(event.target.value)} />}
+      />
+
+      <div className={`panel livePanel ${realtimeStatus === 'connected' ? 'connected' : ''}`}>
+        <div>
+          <span className="eyebrow">Live</span>
+          <strong>{liveLabel}</strong>
+        </div>
+        <p>{lastRealtimeUpdate ? `Last updated ${new Date(lastRealtimeUpdate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : 'Menunggu update realtime.'}</p>
+      </div>
+
+      <div className="sectionHeader">
+        <h2>Today Overview</h2>
+      </div>
+      <div className="metricGrid">
+        <Metric label="Opening Done" value={String(runCount('opening', 'completed') + runCount('opening', 'has_issue'))} tone="green" />
+        <Metric label="Opening Run" value={String(runCount('opening', 'in_progress'))} tone="gold" />
+        <Metric label="Opening Belum" value={String(Math.max(0, activeStaff.length - runStarted('opening')))} tone="red" />
+        <Metric label="Opening Issue" value={String(runCount('opening', 'has_issue'))} tone="red" />
+        <Metric label="Closing Done" value={String(runCount('closing', 'completed') + runCount('closing', 'has_issue'))} tone="green" />
+        <Metric label="Closing Run" value={String(runCount('closing', 'in_progress'))} tone="gold" />
+        <Metric label="Closing Belum" value={String(Math.max(0, activeStaff.length - runStarted('closing')))} tone="red" />
+        <Metric label="Closing Issue" value={String(runCount('closing', 'has_issue'))} tone="red" />
+      </div>
+
+      <div className="sectionHeader">
+        <h2>Staff Progress</h2>
+      </div>
+      <div className="dashboardList">
+        {activeStaff.map((staff) => {
+          const role = store.roles.find((item) => item.roleId === staff.roleId);
+          const opening = dayRuns.find((run) => run.staffId === staff.staffId && run.templateType === 'opening');
+          const closing = dayRuns.find((run) => run.staffId === staff.staffId && run.templateType === 'closing');
+          return (
+            <article className="dashboardRow" key={staff.staffId}>
+              <div>
+                <strong>{staff.staffName}</strong>
+                <span>{role?.roleName || 'Role belum diset'}</span>
+              </div>
+              <div>
+                <span>Opening</span>
+                <strong>{opening ? progressFor(opening) : 'Not Started'}</strong>
+              </div>
+              <div>
+                <span>Closing</span>
+                <strong>{closing ? progressFor(closing) : 'Not Started'}</strong>
+              </div>
+              <div>
+                <span>Open Issue</span>
+                <strong className={issueCountForStaff(staff) ? 'dangerText' : ''}>{issueCountForStaff(staff)}</strong>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="sectionHeader">
+        <h2>Open Issues</h2>
+        <button className="secondaryBtn" onClick={onOpenIssues}>
+          <MessageSquare size={15} /> Issues
+        </button>
+      </div>
+      <div className="metricGrid">
+        <Metric label="Open Today" value={String(dayIssues.length)} tone="red" />
+        <Metric label="Urgent" value={String(openIssues.filter((issue) => issue.priority === 'urgent').length)} tone="red" />
+        <Metric label="High" value={String(openIssues.filter((issue) => issue.priority === 'high').length)} tone="gold" />
+        <Metric label="Medium" value={String(openIssues.filter((issue) => issue.priority === 'medium').length)} tone="gold" />
+      </div>
+      <div className="dashboardList">
+        {openIssues.slice(0, 4).map((issue) => (
+          <button className="dashboardIssue" key={issue.issueId} onClick={onOpenIssues}>
+            <PriorityBadge priority={issue.priority} />
+            <strong>{issue.title}</strong>
+            <span>{issue.createdByName || '-'} - {issue.area || '-'}</span>
+          </button>
+        ))}
+        {!openIssues.length && <EmptyState title="Tidak ada open issue" body="Issue operasional yang masih open akan muncul di sini." />}
+      </div>
+
+      <div className="sectionHeader">
+        <h2>VIP Complimentary</h2>
+        <button className="secondaryBtn" onClick={onOpenReport}>
+          <FileText size={15} /> Report
+        </button>
+      </div>
+      <div className="metricGrid">
+        <Metric label="VIP Sessions" value={String(daySessions.length)} tone="green" />
+        <Metric label="Item Terpakai" value={String(vipTotals.usedQty)} tone="green" />
+        <Metric label="Est. Cost" value={rupiah(vipTotals.totalCost)} tone="gold" />
+        <Metric label="Majoo Pending" value={String(majooPending)} tone="red" />
+      </div>
+
+      <p className="syncStatus muted">{dayItems.length} checklist item tercatat pada tanggal ini.</p>
     </section>
   );
 }
