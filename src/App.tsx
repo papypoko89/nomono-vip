@@ -238,6 +238,22 @@ type AppStore = {
 
 const STORAGE_KEY = 'nomono.vip-complimentary-log.v2';
 const LEGACY_STORAGE_KEY = 'nomono.vip-complimentary-log.v1';
+const RELATIONAL_TABLES = [
+  'nomono_roles',
+  'nomono_vip_items',
+  'nomono_staff',
+  'nomono_checklist_templates',
+  'nomono_checklist_template_items',
+  'nomono_vip_sessions',
+  'nomono_vip_session_items',
+  'nomono_checklist_runs',
+  'nomono_checklist_run_items',
+  'nomono_photo_uploads',
+  'nomono_issues',
+  'nomono_issue_comments',
+  'nomono_settings',
+] as const;
+const REALTIME_TABLES = ['nomono_app_state', ...RELATIONAL_TABLES] as const;
 
 const DEFAULT_ITEMS: VipItem[] = [
   { id: 'item-aqua-600', name: 'Aqua 600ml', category: 'Minuman', hpp: 2500, defaultQty: 6, active: true },
@@ -728,6 +744,24 @@ async function readSupabaseStore(): Promise<AppStore> {
 
 async function readSupabaseStoreResult(): Promise<{ store: AppStore; isEmpty: boolean }> {
   if (!isSupabaseConfigured) throw new Error('Supabase env belum dikonfigurasi.');
+  try {
+    const relational = await readRelationalStoreResult();
+    if (!relational.isEmpty) return relational;
+
+    const legacy = await readLegacySupabaseStoreResult();
+    if (!legacy.isEmpty) {
+      await writeRelationalStore(legacy.store);
+      return legacy;
+    }
+
+    return relational;
+  } catch (error) {
+    if (!isMissingRelationalSchema(error)) throw error;
+    return readLegacySupabaseStoreResult();
+  }
+}
+
+async function readLegacySupabaseStoreResult(): Promise<{ store: AppStore; isEmpty: boolean }> {
   const { data, error } = await supabase.from('nomono_app_state').select('data').eq('id', 'main').maybeSingle();
   if (error) throw new Error(error.message);
   const isEmpty = !data?.data || !Object.keys(data.data as Record<string, unknown>).length;
@@ -739,11 +773,496 @@ async function readSupabaseStoreResult(): Promise<{ store: AppStore; isEmpty: bo
 
 async function writeSupabaseStore(store: AppStore) {
   if (!isSupabaseConfigured) throw new Error('Supabase env belum dikonfigurasi.');
+  try {
+    await writeRelationalStore(store);
+  } catch (error) {
+    if (!isMissingRelationalSchema(error)) throw error;
+  }
+  await writeLegacySupabaseStore(store);
+}
+
+async function writeLegacySupabaseStore(store: AppStore) {
   const { error } = await supabase.from('nomono_app_state').upsert({
     id: 'main',
     data: storePayload(store),
   });
   if (error) throw new Error(error.message);
+}
+
+async function readRelationalStoreResult(): Promise<{ store: AppStore; isEmpty: boolean }> {
+  const [
+    items,
+    staff,
+    roles,
+    templates,
+    templateItems,
+    sessions,
+    sessionItems,
+    runs,
+    runItems,
+    photoUploads,
+    issues,
+    issueComments,
+    settings,
+  ] = await Promise.all([
+    readRows('nomono_vip_items', 'name'),
+    readRows('nomono_staff', 'staff_name'),
+    readRows('nomono_roles', 'role_name'),
+    readRows('nomono_checklist_templates', 'template_name'),
+    readRows('nomono_checklist_template_items', 'sort_order'),
+    readRows('nomono_vip_sessions', 'date'),
+    readRows('nomono_vip_session_items', 'item_name'),
+    readRows('nomono_checklist_runs', 'date'),
+    readRows('nomono_checklist_run_items', 'item_name'),
+    readRows('nomono_photo_uploads', 'uploaded_at'),
+    readRows('nomono_issues', 'updated_at'),
+    readRows('nomono_issue_comments', 'created_at'),
+    readRows('nomono_settings'),
+  ]);
+
+  const isEmpty =
+    !items.length &&
+    !staff.length &&
+    !roles.length &&
+    !templates.length &&
+    !templateItems.length &&
+    !sessions.length &&
+    !runs.length &&
+    !runItems.length &&
+    !issues.length;
+
+  const sessionItemsBySession = groupRows(sessionItems, 'session_id');
+  const store = normalizeStore({
+    items: items.map((row) => ({
+      id: stringCell(row.id),
+      name: stringCell(row.name),
+      category: stringCell(row.category, 'Minuman'),
+      hpp: numberCell(row.hpp),
+      defaultQty: numberCell(row.default_qty),
+      active: boolCell(row.active, true),
+    })),
+    staff: staff.map((row) => ({
+      staffId: stringCell(row.staff_id),
+      staffName: stringCell(row.staff_name),
+      roleId: stringCell(row.role_id),
+      openingTemplateId: stringCell(row.opening_template_id),
+      closingTemplateId: stringCell(row.closing_template_id),
+      isActive: boolCell(row.is_active, true),
+      permissionLevel: stringCell(row.permission_level, 'Staff'),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    roles: roles.map((row) => ({
+      roleId: stringCell(row.role_id),
+      roleName: stringCell(row.role_name),
+      description: stringCell(row.description),
+      isActive: boolCell(row.is_active, true),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    checklistTemplates: templates.map((row) => ({
+      templateId: stringCell(row.template_id),
+      templateName: stringCell(row.template_name),
+      templateType: stringCell(row.template_type, 'opening'),
+      roleId: stringCell(row.role_id),
+      description: stringCell(row.description),
+      isActive: boolCell(row.is_active, true),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    checklistTemplateItems: templateItems.map((row) => ({
+      templateItemId: stringCell(row.template_item_id),
+      templateId: stringCell(row.template_id),
+      itemName: stringCell(row.item_name),
+      itemDescription: stringCell(row.item_description),
+      sortOrder: numberCell(row.sort_order, 1),
+      photoRequired: boolCell(row.photo_required),
+      noteRequired: boolCell(row.note_required),
+      isActive: boolCell(row.is_active, true),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    sessions: sessions.map((row) => ({
+      id: stringCell(row.id),
+      date: stringCell(row.date, todayISO()),
+      startTime: stringCell(row.start_time, '08:00'),
+      endTime: stringCell(row.end_time, '09:00'),
+      bookingName: stringCell(row.booking_name),
+      room: stringCell(row.room, 'VIP Room'),
+      staffName: stringCell(row.staff_name),
+      status: stringCell(row.status, 'completed'),
+      notes: stringCell(row.notes),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+      items: (sessionItemsBySession.get(stringCell(row.id)) || []).map((item) => ({
+        id: stringCell(item.id),
+        itemId: stringCell(item.item_id),
+        itemName: stringCell(item.item_name),
+        hpp: numberCell(item.hpp),
+        preparedQty: numberCell(item.prepared_qty),
+        sealedLeftQty: numberCell(item.sealed_left_qty),
+        usedQty: numberCell(item.used_qty),
+        returnToStockQty: numberCell(item.return_to_stock_qty),
+        totalCost: numberCell(item.total_cost),
+        majooInputDone: boolCell(item.majoo_input_done),
+      })),
+    })),
+    checklistRuns: runs.map((row) => ({
+      runId: stringCell(row.run_id),
+      date: stringCell(row.date, todayISO()),
+      staffId: stringCell(row.staff_id),
+      staffName: stringCell(row.staff_name),
+      roleId: stringCell(row.role_id),
+      roleName: stringCell(row.role_name),
+      templateId: stringCell(row.template_id),
+      templateName: stringCell(row.template_name),
+      templateType: stringCell(row.template_type, 'opening'),
+      status: stringCell(row.status, 'in_progress'),
+      startedAt: stringCell(row.started_at),
+      completedAt: stringCell(row.completed_at),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    checklistRunItems: runItems.map((row) => ({
+      runItemId: stringCell(row.run_item_id),
+      runId: stringCell(row.run_id),
+      templateItemId: stringCell(row.template_item_id),
+      issueId: stringCell(row.issue_id) || undefined,
+      itemName: stringCell(row.item_name),
+      itemDescription: stringCell(row.item_description),
+      status: stringCell(row.status, 'pending'),
+      note: stringCell(row.note),
+      photoUrl: stringCell(row.photo_url),
+      photoThumbnailUrl: stringCell(row.photo_thumbnail_url),
+      photoFileName: stringCell(row.photo_file_name) || undefined,
+      photoRequired: boolCell(row.photo_required),
+      noteRequired: boolCell(row.note_required),
+      completedAt: stringCell(row.completed_at),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    photoUploads: photoUploads.map((row) => ({
+      photoId: stringCell(row.photo_id),
+      runId: stringCell(row.run_id),
+      runItemId: stringCell(row.run_item_id),
+      staffId: stringCell(row.staff_id),
+      staffName: stringCell(row.staff_name),
+      fileName: stringCell(row.file_name),
+      fileUrl: stringCell(row.file_url),
+      thumbnailUrl: stringCell(row.thumbnail_url),
+      uploadedAt: stringCell(row.uploaded_at, nowIso()),
+    })),
+    issues: issues.map((row) => ({
+      issueId: stringCell(row.issue_id),
+      source: stringCell(row.source, 'manual'),
+      sourceId: stringCell(row.source_id),
+      title: stringCell(row.title, 'Issue operasional'),
+      description: stringCell(row.description),
+      status: stringCell(row.status, 'open'),
+      priority: stringCell(row.priority, 'medium'),
+      area: stringCell(row.area),
+      relatedChecklistRunId: stringCell(row.related_checklist_run_id),
+      relatedChecklistRunItemId: stringCell(row.related_checklist_run_item_id),
+      createdByName: stringCell(row.created_by_name),
+      assignedToName: stringCell(row.assigned_to_name),
+      photoUrl: stringCell(row.photo_url),
+      photoThumbnailUrl: stringCell(row.photo_thumbnail_url),
+      resolvedAt: stringCell(row.resolved_at),
+      resolvedByName: stringCell(row.resolved_by_name),
+      closedAt: stringCell(row.closed_at),
+      closedByName: stringCell(row.closed_by_name),
+      createdAt: stringCell(row.created_at, nowIso()),
+      updatedAt: stringCell(row.updated_at, nowIso()),
+    })),
+    issueComments: issueComments.map((row) => ({
+      commentId: stringCell(row.comment_id),
+      issueId: stringCell(row.issue_id),
+      comment: stringCell(row.comment),
+      createdByName: stringCell(row.created_by_name),
+      createdAt: stringCell(row.created_at, nowIso()),
+    })),
+    sync: {
+      autoSync: boolCell(settings[0]?.auto_sync, true),
+      lastSyncedAt: stringCell(settings[0]?.last_synced_at),
+    },
+  });
+
+  return { store, isEmpty };
+}
+
+async function writeRelationalStore(store: AppStore) {
+  const payload = storePayload(store);
+  const sessionItems = store.sessions.flatMap((session) =>
+    session.items.map((item) => ({
+      id: item.id,
+      session_id: session.id,
+      item_id: item.itemId,
+      item_name: item.itemName,
+      hpp: item.hpp,
+      prepared_qty: item.preparedQty,
+      sealed_left_qty: item.sealedLeftQty,
+      used_qty: item.usedQty,
+      return_to_stock_qty: item.returnToStockQty,
+      total_cost: item.totalCost,
+      majoo_input_done: item.majooInputDone,
+    })),
+  );
+
+  await Promise.all([
+    replaceRows(
+      'nomono_roles',
+      'role_id',
+      payload.roles.map((role) => ({
+        role_id: role.roleId,
+        role_name: role.roleName,
+        description: role.description,
+        is_active: role.isActive,
+        created_at: isoOrNull(role.createdAt),
+        updated_at: isoOrNull(role.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_vip_items',
+      'id',
+      payload.items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        hpp: item.hpp,
+        default_qty: item.defaultQty,
+        active: item.active,
+      })),
+    ),
+    replaceRows(
+      'nomono_staff',
+      'staff_id',
+      payload.staff.map((person) => ({
+        staff_id: person.staffId,
+        staff_name: person.staffName,
+        role_id: person.roleId,
+        opening_template_id: person.openingTemplateId,
+        closing_template_id: person.closingTemplateId,
+        is_active: person.isActive,
+        permission_level: person.permissionLevel,
+        created_at: isoOrNull(person.createdAt),
+        updated_at: isoOrNull(person.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_checklist_templates',
+      'template_id',
+      payload.checklistTemplates.map((template) => ({
+        template_id: template.templateId,
+        template_name: template.templateName,
+        template_type: template.templateType,
+        role_id: template.roleId,
+        description: template.description,
+        is_active: template.isActive,
+        created_at: isoOrNull(template.createdAt),
+        updated_at: isoOrNull(template.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_vip_sessions',
+      'id',
+      payload.sessions.map((session) => ({
+        id: session.id,
+        date: session.date,
+        start_time: session.startTime,
+        end_time: session.endTime,
+        booking_name: session.bookingName,
+        room: session.room,
+        staff_name: session.staffName,
+        status: session.status,
+        notes: session.notes || '',
+        created_at: isoOrNull(session.createdAt),
+        updated_at: isoOrNull(session.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_checklist_runs',
+      'run_id',
+      payload.checklistRuns.map((run) => ({
+        run_id: run.runId,
+        date: run.date,
+        staff_id: run.staffId,
+        staff_name: run.staffName,
+        role_id: run.roleId,
+        role_name: run.roleName,
+        template_id: run.templateId,
+        template_name: run.templateName,
+        template_type: run.templateType,
+        status: run.status,
+        started_at: isoOrNull(run.startedAt),
+        completed_at: isoOrNull(run.completedAt),
+        created_at: isoOrNull(run.createdAt),
+        updated_at: isoOrNull(run.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_issues',
+      'issue_id',
+      payload.issues.map((issue) => ({
+        issue_id: issue.issueId,
+        source: issue.source,
+        source_id: issue.sourceId,
+        title: issue.title,
+        description: issue.description,
+        status: issue.status,
+        priority: issue.priority,
+        area: issue.area,
+        related_checklist_run_id: issue.relatedChecklistRunId,
+        related_checklist_run_item_id: issue.relatedChecklistRunItemId,
+        created_by_name: issue.createdByName,
+        assigned_to_name: issue.assignedToName,
+        photo_url: issue.photoUrl,
+        photo_thumbnail_url: issue.photoThumbnailUrl,
+        resolved_at: isoOrNull(issue.resolvedAt),
+        resolved_by_name: issue.resolvedByName,
+        closed_at: isoOrNull(issue.closedAt),
+        closed_by_name: issue.closedByName,
+        created_at: isoOrNull(issue.createdAt),
+        updated_at: isoOrNull(issue.updatedAt),
+      })),
+    ),
+  ]);
+
+  await Promise.all([
+    replaceRows(
+      'nomono_checklist_template_items',
+      'template_item_id',
+      payload.checklistTemplateItems.map((item) => ({
+        template_item_id: item.templateItemId,
+        template_id: item.templateId,
+        item_name: item.itemName,
+        item_description: item.itemDescription,
+        sort_order: item.sortOrder,
+        photo_required: item.photoRequired,
+        note_required: item.noteRequired,
+        is_active: item.isActive,
+        created_at: isoOrNull(item.createdAt),
+        updated_at: isoOrNull(item.updatedAt),
+      })),
+    ),
+    replaceRows('nomono_vip_session_items', 'id', sessionItems),
+    replaceRows(
+      'nomono_checklist_run_items',
+      'run_item_id',
+      payload.checklistRunItems.map((item) => ({
+        run_item_id: item.runItemId,
+        run_id: item.runId,
+        template_item_id: item.templateItemId,
+        issue_id: item.issueId || null,
+        item_name: item.itemName,
+        item_description: item.itemDescription,
+        status: item.status,
+        note: item.note,
+        photo_url: item.photoUrl,
+        photo_thumbnail_url: item.photoThumbnailUrl,
+        photo_file_name: item.photoFileName || null,
+        photo_required: item.photoRequired,
+        note_required: item.noteRequired,
+        completed_at: isoOrNull(item.completedAt),
+        created_at: isoOrNull(item.createdAt),
+        updated_at: isoOrNull(item.updatedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_photo_uploads',
+      'photo_id',
+      payload.photoUploads.map((photo) => ({
+        photo_id: photo.photoId,
+        run_id: photo.runId,
+        run_item_id: photo.runItemId,
+        staff_id: photo.staffId,
+        staff_name: photo.staffName,
+        file_name: photo.fileName,
+        file_url: photo.fileUrl,
+        thumbnail_url: photo.thumbnailUrl,
+        uploaded_at: isoOrNull(photo.uploadedAt),
+      })),
+    ),
+    replaceRows(
+      'nomono_issue_comments',
+      'comment_id',
+      payload.issueComments.map((comment) => ({
+        comment_id: comment.commentId,
+        issue_id: comment.issueId,
+        comment: comment.comment,
+        created_by_name: comment.createdByName,
+        created_at: isoOrNull(comment.createdAt),
+      })),
+    ),
+    writeRelationalSettings(store.sync),
+  ]);
+}
+
+async function writeRelationalSettings(sync: SyncSettings) {
+  const { error } = await supabase.from('nomono_settings').upsert({
+    id: 'main',
+    auto_sync: sync.autoSync,
+    last_synced_at: isoOrNull(sync.lastSyncedAt),
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function readRows(table: string, orderColumn?: string) {
+  const query = supabase.from(table).select('*');
+  const { data, error } = orderColumn ? await query.order(orderColumn, { ascending: true }) : await query;
+  if (error) throw new Error(error.message);
+  return (data || []) as Record<string, unknown>[];
+}
+
+async function replaceRows(table: string, primaryKey: string, rows: Record<string, unknown>[]) {
+  if (rows.length) {
+    const { error } = await supabase.from(table).upsert(rows);
+    if (error) throw new Error(error.message);
+  }
+
+  const ids = rows.map((row) => String(row[primaryKey] || '')).filter(Boolean);
+  const deleteQuery = supabase.from(table).delete();
+  const { error } = ids.length
+    ? await deleteQuery.not(primaryKey, 'in', `(${ids.map(postgrestListValue).join(',')})`)
+    : await deleteQuery.neq(primaryKey, '__nomono_keep_none__');
+  if (error) throw new Error(error.message);
+}
+
+function groupRows(rows: Record<string, unknown>[], key: string) {
+  return rows.reduce((map, row) => {
+    const value = stringCell(row[key]);
+    const list = map.get(value) || [];
+    list.push(row);
+    map.set(value, list);
+    return map;
+  }, new Map<string, Record<string, unknown>[]>());
+}
+
+function stringCell(value: unknown, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+
+function numberCell(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolCell(value: unknown, fallback = false) {
+  if (value === null || value === undefined) return fallback;
+  return value === true || value === 'true' || value === 'TRUE' || value === 1 || value === '1';
+}
+
+function isoOrNull(value?: string) {
+  return value && !Number.isNaN(new Date(value).getTime()) ? value : null;
+}
+
+function postgrestListValue(value: string) {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function isMissingRelationalSchema(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /relation .* does not exist|could not find the table|schema cache/i.test(message);
 }
 
 async function uploadPhotoToSupabase(dataUrl: string, fileName: string, pathPrefix: string) {
@@ -974,9 +1493,7 @@ function App() {
       return;
     }
 
-    const channel = supabase
-      .channel('nomono-manager-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'nomono_app_state' }, () => {
+    const handleRealtimeChange = () => {
         if (pendingLocalSyncRef.current) return;
         if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current);
         realtimeDebounceRef.current = window.setTimeout(async () => {
@@ -990,8 +1507,11 @@ function App() {
             setRealtimeStatus('disconnected');
           }
         }, 500);
-      })
-      .subscribe((status) => {
+    };
+    const channel = REALTIME_TABLES.reduce(
+      (currentChannel, table) => currentChannel.on('postgres_changes', { event: '*', schema: 'public', table }, handleRealtimeChange),
+      supabase.channel('nomono-manager-dashboard'),
+    ).subscribe((status) => {
         setRealtimeStatus(status === 'SUBSCRIBED' ? 'connected' : 'disconnected');
       });
 

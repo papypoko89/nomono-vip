@@ -33,7 +33,7 @@ http://127.0.0.1:5173
 - Role-based financial view: Staff tidak melihat HPP, total biaya, rekap biaya, atau export biaya; nominal hanya tampil di Manager/Supervisor.
 - Export CSV.
 - Persistence lokal via localStorage sebagai fallback.
-- Sync database via Supabase.
+- Database utama via tabel relational Supabase untuk staff, role, template, VIP session, checklist run, issue, komentar, dan foto.
 - Foto bukti via Supabase Storage.
 
 ## Supabase Setup
@@ -44,7 +44,7 @@ http://127.0.0.1:5173
 4. Di Vercel, isi `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY`.
 5. Deploy app.
 
-Data aplikasi disimpan di tabel `nomono_app_state`.
+Data utama aplikasi disimpan di tabel relational `nomono_*`. Tabel `nomono_app_state` masih dipertahankan sebagai backup legacy sementara selama transisi.
 Foto bukti disimpan di bucket Supabase Storage `nomono-checklist-photos`.
 
 File `google-apps-script/VipComplimentaryLog.gs` masih disimpan sebagai arsip backend lama, tetapi app saat ini menggunakan Supabase.
