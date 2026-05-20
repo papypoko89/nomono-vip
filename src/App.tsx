@@ -801,6 +801,18 @@ function App() {
       try {
         await writeSheetStore(store.sync.sheetEndpoint.trim(), store);
         pendingLocalSyncRef.current = false;
+        if (hasLocalPhotoPayload(store)) {
+          setSyncStatus('Foto dikirim ke Google Drive, menunggu URL...');
+          await delay(1800);
+          const remote = await readSheetStore(store.sync.sheetEndpoint.trim());
+          skipAutoSyncRef.current = true;
+          setStore((current) => ({
+            ...remote,
+            sync: { ...current.sync, lastSyncedAt: nowIso() },
+          }));
+          setSyncStatus('URL foto Google Drive sudah dimuat ke app.');
+          return;
+        }
         setSyncStatus(`Auto-sync tersimpan ${timeNow()}`);
       } catch (error) {
         setSyncStatus(error instanceof Error ? error.message : 'Auto-sync gagal.');
@@ -1049,11 +1061,17 @@ function App() {
     setSyncStatus('Mengirim data lokal ke Google Sheet...');
     try {
       await writeSheetStore(endpoint, store);
+      let nextStore = store;
+      if (hasLocalPhotoPayload(store)) {
+        setSyncStatus('Foto dikirim ke Google Drive, menunggu URL...');
+        await delay(1800);
+        nextStore = await readSheetStore(endpoint);
+      }
       pendingLocalSyncRef.current = false;
       remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
-      setStore((current) => ({ ...current, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
-      setSyncStatus('Data lokal sudah dikirim ke Google Sheet.');
+      setStore((current) => ({ ...nextStore, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
+      setSyncStatus(hasLocalPhotoPayload(store) ? 'Data dan URL foto sudah dimuat dari Google Sheet.' : 'Data lokal sudah dikirim ke Google Sheet.');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : 'Gagal kirim ke Google Sheet.');
     }
@@ -2571,6 +2589,14 @@ function getVipTotals(items: VipSessionItem[]) {
 
 function isRunSubmitted(run: ChecklistRun) {
   return run.status === 'completed' || run.status === 'has_issue';
+}
+
+function hasLocalPhotoPayload(store: AppStore) {
+  return store.checklistRunItems.some((item) => Boolean(item.photoDataUrl && !item.photoUrl));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function buildVipRecap(sessions: VipSession[]) {
