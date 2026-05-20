@@ -2061,43 +2061,45 @@ function IssuesScreen({
   onAddComment: (issueId: string, comment: string) => void;
   onOpenPhoto: (photo: PhotoViewer) => void;
 }) {
-  const [status, setStatus] = useState<'all' | IssueStatus>('open');
-  const [priority, setPriority] = useState<'all' | IssuePriority>('all');
+  const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('open');
+  const [priority, setPriority] = useState<'all' | 'critical' | IssuePriority>('all');
   const [date, setDate] = useState(todayISO());
   const [staffName, setStaffName] = useState('all');
-  const [selectedIssueId, setSelectedIssueId] = useState('');
+  const [openIssueId, setOpenIssueId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const isManagerView = selectedStaff?.permissionLevel !== 'Staff';
 
+  const visibleIssues = useMemo(() => store.issues.filter((issue) => issue.status !== 'closed'), [store.issues]);
   const filteredIssues = useMemo(
     () =>
-      store.issues
-        .filter((issue) => (status === 'all' ? true : issue.status === status))
-        .filter((issue) => (priority === 'all' ? true : issue.priority === priority))
+      visibleIssues
+        .filter((issue) => {
+          const currentStatus = issue.status === 'in_progress' ? 'open' : issue.status;
+          return status === 'all' ? true : currentStatus === status;
+        })
+        .filter((issue) =>
+          priority === 'all' ? true : priority === 'critical' ? issue.priority === 'urgent' || issue.priority === 'high' : issue.priority === priority,
+        )
         .filter((issue) => issue.createdAt.slice(0, 10) === date)
         .filter((issue) => (staffName === 'all' ? true : issue.createdByName === staffName))
         .filter((issue) => (isManagerView ? true : issue.createdByName === selectedStaff?.staffName))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [date, isManagerView, priority, selectedStaff?.staffName, staffName, status, store.issues],
+    [date, isManagerView, priority, selectedStaff?.staffName, staffName, status, visibleIssues],
   );
 
-  const openIssues = store.issues.filter((issue) => issue.status === 'open' || issue.status === 'in_progress');
-  const selectedIssue = store.issues.find((issue) => issue.issueId === selectedIssueId) || filteredIssues[0];
-  const selectedRun = selectedIssue ? store.checklistRuns.find((run) => run.runId === selectedIssue.relatedChecklistRunId) : undefined;
-  const selectedItem = selectedIssue
-    ? store.checklistRunItems.find((item) => item.runItemId === selectedIssue.relatedChecklistRunItemId)
-    : undefined;
-  const comments = selectedIssue ? store.issueComments.filter((comment) => comment.issueId === selectedIssue.issueId) : [];
+  const openIssues = visibleIssues.filter((issue) => issue.status === 'open' || issue.status === 'in_progress');
+  const resolvedIssues = visibleIssues.filter((issue) => issue.status === 'resolved');
 
-  const quickFilter = (mode: 'open' | 'urgent' | 'today' | 'resolved') => {
+  const quickFilter = (mode: 'open' | 'high' | 'today' | 'resolved') => {
+    setOpenIssueId('');
     if (mode === 'open') {
       setStatus('open');
       setPriority('all');
       setDate(todayISO());
     }
-    if (mode === 'urgent') {
-      setStatus('all');
-      setPriority('urgent');
+    if (mode === 'high') {
+      setStatus('open');
+      setPriority('critical');
       setDate(todayISO());
     }
     if (mode === 'today') {
@@ -2112,9 +2114,8 @@ function IssuesScreen({
     }
   };
 
-  const submitComment = () => {
-    if (!selectedIssue) return;
-    onAddComment(selectedIssue.issueId, commentDraft);
+  const submitComment = (issueId: string) => {
+    onAddComment(issueId, commentDraft);
     setCommentDraft('');
   };
 
@@ -2123,12 +2124,12 @@ function IssuesScreen({
       <ScreenTitle
         title="Issues"
         subtitle="Pantau masalah operasional dari checklist dan follow up manager."
-        action={<IssueStatusBadge status={isManagerView ? 'in_progress' : 'open'} label={isManagerView ? 'Manager View' : 'Staff View'} />}
+        action={<IssueStatusBadge status="open" label={isManagerView ? 'Manager View' : 'Staff View'} />}
       />
 
       <div className="metricGrid">
-        <Metric label="Open" value={String(openIssues.filter((issue) => issue.status === 'open').length)} tone="red" />
-        <Metric label="In Progress" value={String(openIssues.filter((issue) => issue.status === 'in_progress').length)} tone="gold" />
+        <Metric label="Open" value={String(openIssues.length)} tone="red" />
+        <Metric label="Resolved" value={String(resolvedIssues.length)} tone="green" />
         <Metric label="Urgent" value={String(openIssues.filter((issue) => issue.priority === 'urgent').length)} tone="red" />
         <Metric label="High" value={String(openIssues.filter((issue) => issue.priority === 'high').length)} tone="gold" />
       </div>
@@ -2137,8 +2138,8 @@ function IssuesScreen({
         <button className={status === 'open' && priority === 'all' ? 'active' : ''} onClick={() => quickFilter('open')}>
           Open Issues
         </button>
-        <button className={priority === 'urgent' ? 'active' : ''} onClick={() => quickFilter('urgent')}>
-          Urgent
+        <button className={priority === 'critical' ? 'active' : ''} onClick={() => quickFilter('high')}>
+          Urgent / High
         </button>
         <button className={status === 'all' && priority === 'all' && date === todayISO() ? 'active' : ''} onClick={() => quickFilter('today')}>
           Today
@@ -2153,17 +2154,22 @@ function IssuesScreen({
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </Field>
         <Field label="Status">
-          <select value={status} onChange={(event) => setStatus(event.target.value as 'all' | IssueStatus)}>
+          <select
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value as 'all' | 'open' | 'resolved');
+              setOpenIssueId('');
+            }}
+          >
             <option value="all">Semua</option>
             <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
             <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
           </select>
         </Field>
         <Field label="Priority">
-          <select value={priority} onChange={(event) => setPriority(event.target.value as 'all' | IssuePriority)}>
+          <select value={priority} onChange={(event) => setPriority(event.target.value as 'all' | 'critical' | IssuePriority)}>
             <option value="all">Semua</option>
+            <option value="critical">Urgent / High</option>
             <option value="urgent">Urgent</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
@@ -2173,7 +2179,7 @@ function IssuesScreen({
         <Field label="Staff">
           <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
             <option value="all">Semua</option>
-            {Array.from(new Set(store.issues.map((issue) => issue.createdByName).filter(Boolean))).map((name) => (
+            {Array.from(new Set(visibleIssues.map((issue) => issue.createdByName).filter(Boolean))).map((name) => (
               <option value={name} key={name}>
                 {name}
               </option>
@@ -2182,170 +2188,135 @@ function IssuesScreen({
         </Field>
       </div>
 
-      <div className="issueLayout">
-        <div className="stack tight">
-          {filteredIssues.map((issue) => (
-            <button
-              className={selectedIssue?.issueId === issue.issueId ? 'issueListCard active' : 'issueListCard'}
-              key={issue.issueId}
-              onClick={() => setSelectedIssueId(issue.issueId)}
-            >
-              <div className="issueListHead">
-                <PriorityBadge priority={issue.priority} />
-                <IssueStatusBadge status={issue.status} />
-              </div>
-              <strong>{issue.title}</strong>
-              <span>
-                {issue.createdByName || '-'} · {niceDate(issue.createdAt.slice(0, 10))}
-              </span>
-              <p>{issue.description || 'Belum ada catatan.'}</p>
-            </button>
-          ))}
-          {!filteredIssues.length && <EmptyState title="Tidak ada issue" body="Issue yang sesuai filter akan muncul di sini." />}
-        </div>
-
-        {selectedIssue ? (
-          <article className="panel issueDetailPanel">
-            <div className="issueDetailHead">
-              <div>
-                <span className="eyebrow">{selectedIssue.source.replace('_', ' ')}</span>
-                <h2>{selectedIssue.title}</h2>
-                <p>{selectedIssue.description || 'Belum ada deskripsi.'}</p>
-              </div>
-              <IssueStatusBadge status={selectedIssue.status} />
-            </div>
-
-            <div className="issueMetaGrid">
-              <div>
-                <span>Priority</span>
-                <strong>{issuePriorityLabel(selectedIssue.priority)}</strong>
-              </div>
-              <div>
-                <span>Area</span>
-                <strong>{selectedIssue.area || '-'}</strong>
-              </div>
-              <div>
-                <span>Dibuat oleh</span>
-                <strong>{selectedIssue.createdByName || '-'}</strong>
-              </div>
-              <div>
-                <span>Assigned</span>
-                <strong>{selectedIssue.assignedToName || '-'}</strong>
-              </div>
-            </div>
-
-            {selectedIssue.photoUrl && (
-              <button
-                className="issuePhotoButton"
-                onClick={() =>
-                  onOpenPhoto({
-                    title: selectedIssue.title,
-                    src: selectedIssue.photoThumbnailUrl || selectedIssue.photoUrl,
-                    href: selectedIssue.photoUrl,
-                    note: selectedIssue.description,
-                  })
-                }
-              >
-                <img src={selectedIssue.photoThumbnailUrl || selectedIssue.photoUrl} alt={`Foto ${selectedIssue.title}`} />
-                <span>Lihat foto bukti</span>
-              </button>
-            )}
-
-            {selectedRun && (
-              <div className="syncInfoBox">
-                <span>Related Checklist</span>
-                <strong>{selectedRun.templateName}</strong>
-                <p>
-                  {selectedRun.staffName} · {selectedRun.templateType} · {selectedItem?.itemName || '-'}
-                </p>
-              </div>
-            )}
-
-            <div className="issueControls">
-              <Field label="Status">
-                <select
-                  value={selectedIssue.status}
-                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { status: event.target.value as IssueStatus })}
-                  disabled={!isManagerView}
-                >
-                  <option value="open">Open</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                </select>
-              </Field>
-              <Field label="Priority">
-                <select
-                  value={selectedIssue.priority}
-                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { priority: event.target.value as IssuePriority })}
-                  disabled={!isManagerView}
-                >
-                  <option value="urgent">Urgent</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </Field>
-              <Field label="Assign">
-                <select
-                  value={selectedIssue.assignedToName}
-                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { assignedToName: event.target.value })}
-                  disabled={!isManagerView}
-                >
-                  <option value="">Belum assign</option>
-                  {store.staff
-                    .filter((person) => person.isActive)
-                    .map((person) => (
-                      <option value={person.staffName} key={person.staffId}>
-                        {person.staffName}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-            </div>
-
-            {isManagerView && (
-              <div className="issueActionRow">
-                <button className="secondaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'in_progress' })}>
-                  Set In Progress
-                </button>
-                <button className="secondaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'resolved' })}>
-                  Mark Resolved
-                </button>
-                <button className="primaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'closed' })}>
-                  Close Issue
-                </button>
-              </div>
-            )}
-
-            <div className="commentBox">
-              <Field label="Follow up comment">
-                <textarea value={commentDraft} rows={3} onChange={(event) => setCommentDraft(event.target.value)} placeholder="Tambahkan catatan follow up" />
-              </Field>
-              <button className="accentBtn" onClick={submitComment}>
-                <Plus size={15} /> Comment
-              </button>
-            </div>
-
-            <div className="commentList">
-              {comments.map((comment) => (
-                <div className="commentItem" key={comment.commentId}>
-                  <strong>{comment.createdByName || 'Manager'}</strong>
-                  <span>{new Date(comment.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                  <p>{comment.comment}</p>
+      <div className="stack tight">
+        {filteredIssues.map((issue) => {
+          const expanded = openIssueId === issue.issueId;
+          const selectedRun = store.checklistRuns.find((run) => run.runId === issue.relatedChecklistRunId);
+          const selectedItem = store.checklistRunItems.find((item) => item.runItemId === issue.relatedChecklistRunItemId);
+          const comments = store.issueComments.filter((comment) => comment.issueId === issue.issueId);
+          return (
+            <article className={expanded ? 'issueAccordion active' : 'issueAccordion'} key={issue.issueId}>
+              <button className="issueAccordionSummary" onClick={() => setOpenIssueId(expanded ? '' : issue.issueId)}>
+                <div className="issueListHead">
+                  <PriorityBadge priority={issue.priority} />
+                  <IssueStatusBadge status={issue.status === 'in_progress' ? 'open' : issue.status} />
                 </div>
-              ))}
-              {!comments.length && <p className="syncStatus muted">Belum ada follow up comment.</p>}
-            </div>
-          </article>
-        ) : (
-          <EmptyState title="Pilih issue" body="Detail dan follow up issue akan muncul di sini." />
-        )}
+                <strong>{issue.title}</strong>
+                <span>{issue.createdByName || '-'} - {niceDate(issue.createdAt.slice(0, 10))}</span>
+                <p>{issue.description || 'Belum ada catatan.'}</p>
+                <ChevronDown className={expanded ? 'flip' : ''} size={17} />
+              </button>
+
+              {expanded && (
+                <div className="issueAccordionBody">
+                  <div className="issueMetaGrid">
+                    <div>
+                      <span>Priority</span>
+                      <strong>{issuePriorityLabel(issue.priority)}</strong>
+                    </div>
+                    <div>
+                      <span>Area</span>
+                      <strong>{issue.area || '-'}</strong>
+                    </div>
+                    <div>
+                      <span>Dibuat oleh</span>
+                      <strong>{issue.createdByName || '-'}</strong>
+                    </div>
+                    <div>
+                      <span>Assigned</span>
+                      <strong>{issue.assignedToName || '-'}</strong>
+                    </div>
+                  </div>
+
+                  {issue.photoUrl && (
+                    <button
+                      className="issuePhotoButton"
+                      onClick={() =>
+                        onOpenPhoto({
+                          title: issue.title,
+                          src: issue.photoThumbnailUrl || issue.photoUrl,
+                          href: issue.photoUrl,
+                          note: issue.description,
+                        })
+                      }
+                    >
+                      <img src={issue.photoThumbnailUrl || issue.photoUrl} alt={`Foto ${issue.title}`} />
+                      <span>Lihat foto bukti</span>
+                    </button>
+                  )}
+
+                  {selectedRun && (
+                    <div className="syncInfoBox">
+                      <span>Related Checklist</span>
+                      <strong>{selectedRun.templateName}</strong>
+                      <p>{selectedRun.staffName} - {selectedRun.templateType} - {selectedItem?.itemName || '-'}</p>
+                    </div>
+                  )}
+
+                  {isManagerView && (
+                    <div className="issueControls">
+                      <Field label="Priority">
+                        <select value={issue.priority} onChange={(event) => onUpdateIssue(issue.issueId, { priority: event.target.value as IssuePriority })}>
+                          <option value="urgent">Urgent</option>
+                          <option value="high">High</option>
+                          <option value="medium">Medium</option>
+                          <option value="low">Low</option>
+                        </select>
+                      </Field>
+                      <Field label="Assign">
+                        <select value={issue.assignedToName} onChange={(event) => onUpdateIssue(issue.issueId, { assignedToName: event.target.value })}>
+                          <option value="">Belum assign</option>
+                          {store.staff
+                            .filter((person) => person.isActive)
+                            .map((person) => (
+                              <option value={person.staffName} key={person.staffId}>
+                                {person.staffName}
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                      {issue.status !== 'resolved' && (
+                        <button className="primaryBtn" onClick={() => onUpdateIssue(issue.issueId, { status: 'resolved' })}>
+                          <Check size={16} /> Resolve Issue
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="commentBox">
+                    <Field label="Follow up comment">
+                      <textarea
+                        value={commentDraft}
+                        rows={3}
+                        onChange={(event) => setCommentDraft(event.target.value)}
+                        placeholder="Tambahkan catatan follow up"
+                      />
+                    </Field>
+                    <button className="accentBtn" onClick={() => submitComment(issue.issueId)}>
+                      <Plus size={15} /> Comment
+                    </button>
+                  </div>
+
+                  <div className="commentList">
+                    {comments.map((comment) => (
+                      <div className="commentItem" key={comment.commentId}>
+                        <strong>{comment.createdByName || 'Manager'}</strong>
+                        <span>{new Date(comment.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                        <p>{comment.comment}</p>
+                      </div>
+                    ))}
+                    {!comments.length && <p className="syncStatus muted">Belum ada follow up comment.</p>}
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        })}
+        {!filteredIssues.length && <EmptyState title="Tidak ada issue" body="Issue yang sesuai filter akan muncul di sini." />}
       </div>
     </section>
   );
 }
-
 function VipRecapPanel({ sessions, selectedMonth }: { sessions: VipSession[]; selectedMonth: string }) {
   const monthlySessions = useMemo(
     () => sessions.filter((session) => session.date.slice(0, 7) === selectedMonth),

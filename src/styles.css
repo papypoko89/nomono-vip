@@ -916,57 +916,69 @@ textarea:focus {
   height: 90px;
 }
 
-.issueLayout {
-  display: grid;
-  gap: 12px;
-}
-
-.issueListCard {
-  display: grid;
-  gap: 7px;
+.issueAccordion {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff70;
+  overflow: hidden;
+}
+
+.issueAccordion.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.issueAccordionSummary {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  background: transparent;
   padding: 12px;
   text-align: left;
 }
 
-.issueListCard.active {
-  border-color: var(--green);
-  background: var(--green-soft);
+.issueAccordionSummary svg {
+  position: absolute;
+  top: 14px;
+  right: 12px;
 }
 
 .issueListHead {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding-right: 28px;
 }
 
-.issueListCard strong,
+.issueAccordionSummary strong,
 .issueDetailHead h2 {
   margin: 0;
   color: var(--ink);
   font-size: 14px;
 }
 
-.issueListCard span {
+.issueAccordionSummary span {
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.issueListCard p,
+.issueAccordionSummary p,
 .issueDetailHead p {
   margin: 0;
+  padding-right: 28px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
 }
 
-.issueDetailPanel {
+.issueAccordionBody {
   display: grid;
   gap: 13px;
+  border-top: 1px solid var(--line);
+  padding: 12px;
 }
 
 .issueDetailHead {
@@ -1440,13 +1452,9 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .issueLayout {
-    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.15fr);
-    align-items: start;
-  }
-
   .issueControls {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    align-items: end;
   }
 }
 
