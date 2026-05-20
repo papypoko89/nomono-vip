@@ -372,7 +372,9 @@ textarea:focus {
 
 .statusPill,
 .statusBadge,
-.itemStatus {
+.itemStatus,
+.issueStatus,
+.priorityBadge {
   width: fit-content;
   border-radius: 999px;
   padding: 6px 9px;
@@ -488,9 +490,33 @@ textarea:focus {
 }
 
 .statusBadge.has_issue,
-.itemStatus.issue {
+.itemStatus.issue,
+.issueStatus.open {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.issueStatus.in_progress,
+.priorityBadge.high {
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+.issueStatus.resolved,
+.issueStatus.closed,
+.priorityBadge.low {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.priorityBadge.urgent {
+  background: var(--danger);
+  color: var(--white);
+}
+
+.priorityBadge.medium {
+  background: #231f2010;
+  color: var(--muted);
 }
 
 .itemStatus.skipped {
@@ -890,6 +916,160 @@ textarea:focus {
   height: 90px;
 }
 
+.issueLayout {
+  display: grid;
+  gap: 12px;
+}
+
+.issueListCard {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff70;
+  padding: 12px;
+  text-align: left;
+}
+
+.issueListCard.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.issueListHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.issueListCard strong,
+.issueDetailHead h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.issueListCard span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.issueListCard p,
+.issueDetailHead p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.issueDetailPanel {
+  display: grid;
+  gap: 13px;
+}
+
+.issueDetailHead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.issueMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.issueMetaGrid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff55;
+  padding: 10px;
+}
+
+.issueMetaGrid span,
+.commentItem span {
+  display: block;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.issueMetaGrid strong,
+.commentItem strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.issuePhotoButton {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff70;
+  padding: 9px;
+  color: var(--green);
+  text-align: left;
+}
+
+.issuePhotoButton img {
+  width: 92px;
+  height: 68px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.issuePhotoButton span {
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.issueControls {
+  display: grid;
+  gap: 9px;
+}
+
+.issueActionRow,
+.commentBox {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.commentBox .field {
+  flex: 1 1 220px;
+}
+
+.commentList {
+  display: grid;
+  gap: 8px;
+}
+
+.commentItem {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff55;
+  padding: 10px;
+}
+
+.commentItem p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .lightboxBackdrop {
   position: fixed;
   inset: 0;
@@ -1195,7 +1375,7 @@ textarea:focus {
   left: 0;
   z-index: 35;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border-top: 1px solid var(--line);
   background: #fafaf7f2;
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
@@ -1259,6 +1439,15 @@ textarea:focus {
   .runGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .issueLayout {
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.15fr);
+    align-items: start;
+  }
+
+  .issueControls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
@@ -1275,7 +1464,9 @@ textarea:focus {
   .runGrid,
   .qtyGrid,
   .itemActions,
-  .issueCard {
+  .issueCard,
+  .issueDetailHead,
+  .issueMetaGrid {
     grid-template-columns: 1fr;
   }
 

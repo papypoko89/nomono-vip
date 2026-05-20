@@ -11,6 +11,7 @@ import {
   FileText,
   Image,
   ListChecks,
+  MessageSquare,
   Package,
   Plus,
   RotateCcw,
@@ -25,11 +26,14 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SUPABASE_PHOTO_BUCKET, isSupabaseConfigured, supabase } from './supabaseClient';
 
-type Tab = 'vip' | 'checklist' | 'report' | 'master';
+type Tab = 'vip' | 'checklist' | 'report' | 'issues' | 'master';
 type TemplateType = 'opening' | 'closing' | 'custom';
 type RunStatus = 'not_started' | 'in_progress' | 'completed' | 'has_issue';
 type RunItemStatus = 'pending' | 'done' | 'issue' | 'skipped';
 type PermissionLevel = 'Staff' | 'Supervisor' | 'Manager';
+type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+type IssuePriority = 'low' | 'medium' | 'high' | 'urgent';
+type IssueSource = 'checklist' | 'vip_complimentary' | 'manual';
 
 type VipItem = {
   id: string;
@@ -138,6 +142,7 @@ type ChecklistRunItem = {
   runItemId: string;
   runId: string;
   templateItemId: string;
+  issueId?: string;
   itemName: string;
   itemDescription: string;
   status: RunItemStatus;
@@ -163,6 +168,37 @@ type PhotoUpload = {
   fileUrl: string;
   thumbnailUrl: string;
   uploadedAt: string;
+};
+
+type Issue = {
+  issueId: string;
+  source: IssueSource;
+  sourceId: string;
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  area: string;
+  relatedChecklistRunId: string;
+  relatedChecklistRunItemId: string;
+  createdByName: string;
+  assignedToName: string;
+  photoUrl: string;
+  photoThumbnailUrl: string;
+  resolvedAt: string;
+  resolvedByName: string;
+  closedAt: string;
+  closedByName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type IssueComment = {
+  commentId: string;
+  issueId: string;
+  comment: string;
+  createdByName: string;
+  createdAt: string;
 };
 
 type SyncSettings = {
@@ -194,6 +230,8 @@ type AppStore = {
   checklistRuns: ChecklistRun[];
   checklistRunItems: ChecklistRunItem[];
   photoUploads: PhotoUpload[];
+  issues: Issue[];
+  issueComments: IssueComment[];
   sync: SyncSettings;
 };
 
@@ -389,6 +427,8 @@ const emptyStore = (): AppStore => ({
   checklistRuns: [],
   checklistRunItems: [],
   photoUploads: [],
+  issues: [],
+  issueComments: [],
   sync: {
     autoSync: true,
   },
@@ -417,6 +457,8 @@ function normalizeStore(value: unknown): AppStore {
     checklistRuns: Array.isArray(parsed.checklistRuns) ? parsed.checklistRuns.map(normalizeRun) : [],
     checklistRunItems: Array.isArray(parsed.checklistRunItems) ? parsed.checklistRunItems.map(normalizeRunItem) : [],
     photoUploads: Array.isArray(parsed.photoUploads) ? parsed.photoUploads.map(normalizePhotoUpload) : [],
+    issues: Array.isArray(parsed.issues) ? parsed.issues.map(normalizeIssue) : [],
+    issueComments: Array.isArray(parsed.issueComments) ? parsed.issueComments.map(normalizeIssueComment) : [],
     sync: {
       autoSync: true,
       lastSyncedAt: parsed.sync?.lastSyncedAt,
@@ -555,6 +597,7 @@ function normalizeRunItem(item: Partial<ChecklistRunItem>): ChecklistRunItem {
     runItemId: String(item.runItemId || uid()),
     runId: String(item.runId || ''),
     templateItemId: String(item.templateItemId || ''),
+    issueId: item.issueId ? String(item.issueId) : undefined,
     itemName: String(item.itemName || ''),
     itemDescription: String(item.itemDescription || ''),
     status: normalizeRunItemStatus(item.status),
@@ -574,6 +617,56 @@ function normalizeRunItem(item: Partial<ChecklistRunItem>): ChecklistRunItem {
 function normalizeRunItemStatus(value: unknown): RunItemStatus {
   if (value === 'done' || value === 'issue' || value === 'skipped') return value;
   return 'pending';
+}
+
+function normalizeIssue(issue: Partial<Issue>): Issue {
+  return {
+    issueId: String(issue.issueId || uid()),
+    source: normalizeIssueSource(issue.source),
+    sourceId: String(issue.sourceId || ''),
+    title: String(issue.title || 'Issue operasional'),
+    description: String(issue.description || ''),
+    status: normalizeIssueStatus(issue.status),
+    priority: normalizeIssuePriority(issue.priority),
+    area: String(issue.area || ''),
+    relatedChecklistRunId: String(issue.relatedChecklistRunId || ''),
+    relatedChecklistRunItemId: String(issue.relatedChecklistRunItemId || ''),
+    createdByName: String(issue.createdByName || ''),
+    assignedToName: String(issue.assignedToName || ''),
+    photoUrl: String(issue.photoUrl || ''),
+    photoThumbnailUrl: String(issue.photoThumbnailUrl || issue.photoUrl || ''),
+    resolvedAt: String(issue.resolvedAt || ''),
+    resolvedByName: String(issue.resolvedByName || ''),
+    closedAt: String(issue.closedAt || ''),
+    closedByName: String(issue.closedByName || ''),
+    createdAt: String(issue.createdAt || nowIso()),
+    updatedAt: String(issue.updatedAt || nowIso()),
+  };
+}
+
+function normalizeIssueComment(comment: Partial<IssueComment>): IssueComment {
+  return {
+    commentId: String(comment.commentId || uid()),
+    issueId: String(comment.issueId || ''),
+    comment: String(comment.comment || ''),
+    createdByName: String(comment.createdByName || ''),
+    createdAt: String(comment.createdAt || nowIso()),
+  };
+}
+
+function normalizeIssueSource(value: unknown): IssueSource {
+  if (value === 'checklist' || value === 'vip_complimentary') return value;
+  return 'manual';
+}
+
+function normalizeIssueStatus(value: unknown): IssueStatus {
+  if (value === 'in_progress' || value === 'resolved' || value === 'closed') return value;
+  return 'open';
+}
+
+function normalizeIssuePriority(value: unknown): IssuePriority {
+  if (value === 'low' || value === 'high' || value === 'urgent') return value;
+  return 'medium';
 }
 
 function normalizePhotoUpload(photo: Partial<PhotoUpload>): PhotoUpload {
@@ -621,6 +714,8 @@ function storePayload(store: AppStore) {
     checklistRuns: store.checklistRuns,
     checklistRunItems: store.checklistRunItems,
     photoUploads: store.photoUploads,
+    issues: store.issues,
+    issueComments: store.issueComments,
   };
 }
 
@@ -662,6 +757,70 @@ async function uploadPhotoToSupabase(dataUrl: string, fileName: string, pathPref
   if (error) throw new Error(error.message);
   const { data } = supabase.storage.from(SUPABASE_PHOTO_BUCKET).getPublicUrl(cleanPath);
   return data.publicUrl;
+}
+
+function syncIssueForRunItem(store: AppStore, runItem: ChecklistRunItem, timestamp = nowIso()): AppStore {
+  if (runItem.status !== 'issue') return store;
+  const run = store.checklistRuns.find((item) => item.runId === runItem.runId);
+  if (!run) return store;
+
+  const existingIssue = store.issues.find(
+    (issue) => issue.issueId === runItem.issueId || issue.relatedChecklistRunItemId === runItem.runItemId,
+  );
+  const issueId = existingIssue?.issueId || runItem.issueId || uid();
+  const nextRunItems = store.checklistRunItems.map((item) => (item.runItemId === runItem.runItemId ? { ...item, issueId } : item));
+
+  if (existingIssue) {
+    if (existingIssue.status === 'resolved' || existingIssue.status === 'closed') {
+      return { ...store, checklistRunItems: nextRunItems };
+    }
+    return {
+      ...store,
+      checklistRunItems: nextRunItems,
+      issues: store.issues.map((issue) =>
+        issue.issueId === existingIssue.issueId
+          ? {
+              ...issue,
+              title: `Issue: ${runItem.itemName}`,
+              description: runItem.note,
+              area: issue.area || run.roleName || run.templateType,
+              photoUrl: runItem.photoUrl || issue.photoUrl,
+              photoThumbnailUrl: runItem.photoThumbnailUrl || runItem.photoUrl || issue.photoThumbnailUrl,
+              updatedAt: timestamp,
+            }
+          : issue,
+      ),
+    };
+  }
+
+  const issue: Issue = {
+    issueId,
+    source: 'checklist',
+    sourceId: runItem.runItemId,
+    title: `Issue: ${runItem.itemName}`,
+    description: runItem.note,
+    status: 'open',
+    priority: 'medium',
+    area: run.roleName || run.templateType,
+    relatedChecklistRunId: run.runId,
+    relatedChecklistRunItemId: runItem.runItemId,
+    createdByName: run.staffName,
+    assignedToName: '',
+    photoUrl: runItem.photoUrl,
+    photoThumbnailUrl: runItem.photoThumbnailUrl || runItem.photoUrl,
+    resolvedAt: '',
+    resolvedByName: '',
+    closedAt: '',
+    closedByName: '',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  return {
+    ...store,
+    checklistRunItems: nextRunItems,
+    issues: [issue, ...store.issues],
+  };
 }
 
 function calculateLine(line: VipSessionItem): VipSessionItem {
@@ -916,12 +1075,17 @@ function App() {
   };
 
   const patchRunItem = (runItemId: string, patch: Partial<ChecklistRunItem>) => {
-    updateStore((current) => ({
-      ...current,
-      checklistRunItems: current.checklistRunItems.map((item) =>
-        item.runItemId === runItemId ? { ...item, ...patch, updatedAt: nowIso() } : item,
-      ),
-    }));
+    updateStore((current) => {
+      const timestamp = nowIso();
+      let updatedItem: ChecklistRunItem | undefined;
+      const checklistRunItems = current.checklistRunItems.map((item) => {
+        if (item.runItemId !== runItemId) return item;
+        updatedItem = { ...item, ...patch, updatedAt: timestamp };
+        return updatedItem;
+      });
+      const next = { ...current, checklistRunItems };
+      return updatedItem?.status === 'issue' ? syncIssueForRunItem(next, updatedItem, timestamp) : next;
+    });
   };
 
   const markRunItem = (runItemId: string, status: 'done' | 'issue') => {
@@ -993,35 +1157,87 @@ function App() {
     }
 
     const uploadedAt = nowIso();
+    updateStore((current) => {
+      let updatedItem: ChecklistRunItem | undefined;
+      const checklistRunItems = current.checklistRunItems.map((row) => {
+        if (row.runItemId !== item.runItemId) return row;
+        updatedItem = {
+          ...row,
+          photoUrl,
+          photoThumbnailUrl: thumbnailUrl,
+          photoDataUrl: photoUrl ? undefined : dataUrl,
+          photoFileName: fileName,
+          updatedAt: uploadedAt,
+        };
+        return updatedItem;
+      });
+      const next = {
+        ...current,
+        checklistRunItems,
+        photoUploads: [
+          {
+            photoId: uid(),
+            runId: run.runId,
+            runItemId: item.runItemId,
+            staffId: run.staffId,
+            staffName: run.staffName,
+            fileName,
+            fileUrl: photoUrl || dataUrl,
+            thumbnailUrl,
+            uploadedAt,
+          },
+          ...current.photoUploads.filter((photo) => photo.runItemId !== item.runItemId),
+        ],
+      };
+      return updatedItem?.status === 'issue' ? syncIssueForRunItem(next, updatedItem, uploadedAt) : next;
+    });
+  };
+
+  const updateIssue = (issueId: string, patch: Partial<Issue>) => {
+    updateStore((current) => {
+      const timestamp = nowIso();
+      return {
+        ...current,
+        issues: current.issues.map((issue) => {
+          if (issue.issueId !== issueId) return issue;
+          const nextStatus = patch.status || issue.status;
+          return {
+            ...issue,
+            ...patch,
+            resolvedAt: nextStatus === 'resolved' && !issue.resolvedAt ? timestamp : patch.resolvedAt ?? issue.resolvedAt,
+            resolvedByName:
+              nextStatus === 'resolved' && !issue.resolvedByName ? selectedStaff?.staffName || 'Manager' : patch.resolvedByName ?? issue.resolvedByName,
+            closedAt: nextStatus === 'closed' && !issue.closedAt ? timestamp : patch.closedAt ?? issue.closedAt,
+            closedByName: nextStatus === 'closed' && !issue.closedByName ? selectedStaff?.staffName || 'Manager' : patch.closedByName ?? issue.closedByName,
+            updatedAt: timestamp,
+          };
+        }),
+      };
+    });
+    notify('Issue diperbarui', 'Status atau detail issue sudah disimpan.');
+  };
+
+  const addIssueComment = (issueId: string, comment: string) => {
+    const trimmed = comment.trim();
+    if (!trimmed) {
+      notify('Komentar kosong', 'Isi catatan follow up dulu.', 'warning');
+      return;
+    }
     updateStore((current) => ({
       ...current,
-      checklistRunItems: current.checklistRunItems.map((row) =>
-        row.runItemId === item.runItemId
-          ? {
-              ...row,
-              photoUrl,
-              photoThumbnailUrl: thumbnailUrl,
-              photoDataUrl: photoUrl ? undefined : dataUrl,
-              photoFileName: fileName,
-              updatedAt: uploadedAt,
-            }
-          : row,
-      ),
-      photoUploads: [
+      issueComments: [
         {
-          photoId: uid(),
-          runId: run.runId,
-          runItemId: item.runItemId,
-          staffId: run.staffId,
-          staffName: run.staffName,
-          fileName,
-          fileUrl: photoUrl || dataUrl,
-          thumbnailUrl,
-          uploadedAt,
+          commentId: uid(),
+          issueId,
+          comment: trimmed,
+          createdByName: selectedStaff?.staffName || 'Manager',
+          createdAt: nowIso(),
         },
-        ...current.photoUploads.filter((photo) => photo.runItemId !== item.runItemId),
+        ...current.issueComments,
       ],
+      issues: current.issues.map((issue) => (issue.issueId === issueId ? { ...issue, updatedAt: nowIso() } : issue)),
     }));
+    notify('Komentar ditambahkan', 'Follow up issue sudah tercatat.');
   };
 
   const pushToRemote = async () => {
@@ -1118,6 +1334,16 @@ function App() {
 
         {tab === 'report' && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} />}
 
+        {tab === 'issues' && (
+          <IssuesScreen
+            store={store}
+            selectedStaff={selectedStaff}
+            onUpdateIssue={updateIssue}
+            onAddComment={addIssueComment}
+            onOpenPhoto={setPhotoViewer}
+          />
+        )}
+
         {tab === 'master' && (
           <MasterScreen
             store={store}
@@ -1134,6 +1360,7 @@ function App() {
         <NavButton icon={<ClipboardList />} label="VIP Log" active={tab === 'vip'} onClick={() => setTab('vip')} />
         <NavButton icon={<ClipboardCheck />} label="Checklist" active={tab === 'checklist'} onClick={() => setTab('checklist')} />
         <NavButton icon={<BarChart3 />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />
+        <NavButton icon={<MessageSquare />} label="Issues" active={tab === 'issues'} onClick={() => setTab('issues')} />
         <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />
       </nav>
       <Toast toast={toast} />
@@ -1816,6 +2043,304 @@ function ReportScreen({ store, onOpenPhoto }: { store: AppStore; onOpenPhoto: (p
           );
         })}
         {!issues.length && <EmptyState title="Tidak ada issue" body="Issue checklist pada tanggal terpilih akan muncul di sini." />}
+      </div>
+    </section>
+  );
+}
+
+function IssuesScreen({
+  store,
+  selectedStaff,
+  onUpdateIssue,
+  onAddComment,
+  onOpenPhoto,
+}: {
+  store: AppStore;
+  selectedStaff?: Staff;
+  onUpdateIssue: (issueId: string, patch: Partial<Issue>) => void;
+  onAddComment: (issueId: string, comment: string) => void;
+  onOpenPhoto: (photo: PhotoViewer) => void;
+}) {
+  const [status, setStatus] = useState<'all' | IssueStatus>('open');
+  const [priority, setPriority] = useState<'all' | IssuePriority>('all');
+  const [date, setDate] = useState(todayISO());
+  const [staffName, setStaffName] = useState('all');
+  const [selectedIssueId, setSelectedIssueId] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
+  const isManagerView = selectedStaff?.permissionLevel !== 'Staff';
+
+  const filteredIssues = useMemo(
+    () =>
+      store.issues
+        .filter((issue) => (status === 'all' ? true : issue.status === status))
+        .filter((issue) => (priority === 'all' ? true : issue.priority === priority))
+        .filter((issue) => issue.createdAt.slice(0, 10) === date)
+        .filter((issue) => (staffName === 'all' ? true : issue.createdByName === staffName))
+        .filter((issue) => (isManagerView ? true : issue.createdByName === selectedStaff?.staffName))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [date, isManagerView, priority, selectedStaff?.staffName, staffName, status, store.issues],
+  );
+
+  const openIssues = store.issues.filter((issue) => issue.status === 'open' || issue.status === 'in_progress');
+  const selectedIssue = store.issues.find((issue) => issue.issueId === selectedIssueId) || filteredIssues[0];
+  const selectedRun = selectedIssue ? store.checklistRuns.find((run) => run.runId === selectedIssue.relatedChecklistRunId) : undefined;
+  const selectedItem = selectedIssue
+    ? store.checklistRunItems.find((item) => item.runItemId === selectedIssue.relatedChecklistRunItemId)
+    : undefined;
+  const comments = selectedIssue ? store.issueComments.filter((comment) => comment.issueId === selectedIssue.issueId) : [];
+
+  const quickFilter = (mode: 'open' | 'urgent' | 'today' | 'resolved') => {
+    if (mode === 'open') {
+      setStatus('open');
+      setPriority('all');
+      setDate(todayISO());
+    }
+    if (mode === 'urgent') {
+      setStatus('all');
+      setPriority('urgent');
+      setDate(todayISO());
+    }
+    if (mode === 'today') {
+      setStatus('all');
+      setPriority('all');
+      setDate(todayISO());
+    }
+    if (mode === 'resolved') {
+      setStatus('resolved');
+      setPriority('all');
+      setDate(todayISO());
+    }
+  };
+
+  const submitComment = () => {
+    if (!selectedIssue) return;
+    onAddComment(selectedIssue.issueId, commentDraft);
+    setCommentDraft('');
+  };
+
+  return (
+    <section className="stack">
+      <ScreenTitle
+        title="Issues"
+        subtitle="Pantau masalah operasional dari checklist dan follow up manager."
+        action={<IssueStatusBadge status={isManagerView ? 'in_progress' : 'open'} label={isManagerView ? 'Manager View' : 'Staff View'} />}
+      />
+
+      <div className="metricGrid">
+        <Metric label="Open" value={String(openIssues.filter((issue) => issue.status === 'open').length)} tone="red" />
+        <Metric label="In Progress" value={String(openIssues.filter((issue) => issue.status === 'in_progress').length)} tone="gold" />
+        <Metric label="Urgent" value={String(openIssues.filter((issue) => issue.priority === 'urgent').length)} tone="red" />
+        <Metric label="High" value={String(openIssues.filter((issue) => issue.priority === 'high').length)} tone="gold" />
+      </div>
+
+      <div className="filterBar">
+        <button className={status === 'open' && priority === 'all' ? 'active' : ''} onClick={() => quickFilter('open')}>
+          Open Issues
+        </button>
+        <button className={priority === 'urgent' ? 'active' : ''} onClick={() => quickFilter('urgent')}>
+          Urgent
+        </button>
+        <button className={status === 'all' && priority === 'all' && date === todayISO() ? 'active' : ''} onClick={() => quickFilter('today')}>
+          Today
+        </button>
+        <button className={status === 'resolved' ? 'active' : ''} onClick={() => quickFilter('resolved')}>
+          Resolved
+        </button>
+      </div>
+
+      <div className="panel filterGrid">
+        <Field label="Tanggal">
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        </Field>
+        <Field label="Status">
+          <select value={status} onChange={(event) => setStatus(event.target.value as 'all' | IssueStatus)}>
+            <option value="all">Semua</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </Field>
+        <Field label="Priority">
+          <select value={priority} onChange={(event) => setPriority(event.target.value as 'all' | IssuePriority)}>
+            <option value="all">Semua</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </Field>
+        <Field label="Staff">
+          <select value={staffName} onChange={(event) => setStaffName(event.target.value)}>
+            <option value="all">Semua</option>
+            {Array.from(new Set(store.issues.map((issue) => issue.createdByName).filter(Boolean))).map((name) => (
+              <option value={name} key={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="issueLayout">
+        <div className="stack tight">
+          {filteredIssues.map((issue) => (
+            <button
+              className={selectedIssue?.issueId === issue.issueId ? 'issueListCard active' : 'issueListCard'}
+              key={issue.issueId}
+              onClick={() => setSelectedIssueId(issue.issueId)}
+            >
+              <div className="issueListHead">
+                <PriorityBadge priority={issue.priority} />
+                <IssueStatusBadge status={issue.status} />
+              </div>
+              <strong>{issue.title}</strong>
+              <span>
+                {issue.createdByName || '-'} · {niceDate(issue.createdAt.slice(0, 10))}
+              </span>
+              <p>{issue.description || 'Belum ada catatan.'}</p>
+            </button>
+          ))}
+          {!filteredIssues.length && <EmptyState title="Tidak ada issue" body="Issue yang sesuai filter akan muncul di sini." />}
+        </div>
+
+        {selectedIssue ? (
+          <article className="panel issueDetailPanel">
+            <div className="issueDetailHead">
+              <div>
+                <span className="eyebrow">{selectedIssue.source.replace('_', ' ')}</span>
+                <h2>{selectedIssue.title}</h2>
+                <p>{selectedIssue.description || 'Belum ada deskripsi.'}</p>
+              </div>
+              <IssueStatusBadge status={selectedIssue.status} />
+            </div>
+
+            <div className="issueMetaGrid">
+              <div>
+                <span>Priority</span>
+                <strong>{issuePriorityLabel(selectedIssue.priority)}</strong>
+              </div>
+              <div>
+                <span>Area</span>
+                <strong>{selectedIssue.area || '-'}</strong>
+              </div>
+              <div>
+                <span>Dibuat oleh</span>
+                <strong>{selectedIssue.createdByName || '-'}</strong>
+              </div>
+              <div>
+                <span>Assigned</span>
+                <strong>{selectedIssue.assignedToName || '-'}</strong>
+              </div>
+            </div>
+
+            {selectedIssue.photoUrl && (
+              <button
+                className="issuePhotoButton"
+                onClick={() =>
+                  onOpenPhoto({
+                    title: selectedIssue.title,
+                    src: selectedIssue.photoThumbnailUrl || selectedIssue.photoUrl,
+                    href: selectedIssue.photoUrl,
+                    note: selectedIssue.description,
+                  })
+                }
+              >
+                <img src={selectedIssue.photoThumbnailUrl || selectedIssue.photoUrl} alt={`Foto ${selectedIssue.title}`} />
+                <span>Lihat foto bukti</span>
+              </button>
+            )}
+
+            {selectedRun && (
+              <div className="syncInfoBox">
+                <span>Related Checklist</span>
+                <strong>{selectedRun.templateName}</strong>
+                <p>
+                  {selectedRun.staffName} · {selectedRun.templateType} · {selectedItem?.itemName || '-'}
+                </p>
+              </div>
+            )}
+
+            <div className="issueControls">
+              <Field label="Status">
+                <select
+                  value={selectedIssue.status}
+                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { status: event.target.value as IssueStatus })}
+                  disabled={!isManagerView}
+                >
+                  <option value="open">Open</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </Field>
+              <Field label="Priority">
+                <select
+                  value={selectedIssue.priority}
+                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { priority: event.target.value as IssuePriority })}
+                  disabled={!isManagerView}
+                >
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </Field>
+              <Field label="Assign">
+                <select
+                  value={selectedIssue.assignedToName}
+                  onChange={(event) => onUpdateIssue(selectedIssue.issueId, { assignedToName: event.target.value })}
+                  disabled={!isManagerView}
+                >
+                  <option value="">Belum assign</option>
+                  {store.staff
+                    .filter((person) => person.isActive)
+                    .map((person) => (
+                      <option value={person.staffName} key={person.staffId}>
+                        {person.staffName}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+            </div>
+
+            {isManagerView && (
+              <div className="issueActionRow">
+                <button className="secondaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'in_progress' })}>
+                  Set In Progress
+                </button>
+                <button className="secondaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'resolved' })}>
+                  Mark Resolved
+                </button>
+                <button className="primaryBtn" onClick={() => onUpdateIssue(selectedIssue.issueId, { status: 'closed' })}>
+                  Close Issue
+                </button>
+              </div>
+            )}
+
+            <div className="commentBox">
+              <Field label="Follow up comment">
+                <textarea value={commentDraft} rows={3} onChange={(event) => setCommentDraft(event.target.value)} placeholder="Tambahkan catatan follow up" />
+              </Field>
+              <button className="accentBtn" onClick={submitComment}>
+                <Plus size={15} /> Comment
+              </button>
+            </div>
+
+            <div className="commentList">
+              {comments.map((comment) => (
+                <div className="commentItem" key={comment.commentId}>
+                  <strong>{comment.createdByName || 'Manager'}</strong>
+                  <span>{new Date(comment.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                  <p>{comment.comment}</p>
+                </div>
+              ))}
+              {!comments.length && <p className="syncStatus muted">Belum ada follow up comment.</p>}
+            </div>
+          </article>
+        ) : (
+          <EmptyState title="Pilih issue" body="Detail dan follow up issue akan muncul di sini." />
+        )}
       </div>
     </section>
   );
@@ -2521,6 +3046,14 @@ function ItemStatus({ status }: { status: RunItemStatus }) {
   return <span className={`itemStatus ${status}`}>{labels[status]}</span>;
 }
 
+function IssueStatusBadge({ status, label }: { status: IssueStatus; label?: string }) {
+  return <span className={`issueStatus ${status}`}>{label || issueStatusLabel(status)}</span>;
+}
+
+function PriorityBadge({ priority }: { priority: IssuePriority }) {
+  return <span className={`priorityBadge ${priority}`}>{issuePriorityLabel(priority)}</span>;
+}
+
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
     <button className={`toggle ${checked ? 'on' : ''}`} onClick={onChange} aria-label="Toggle status">
@@ -2648,6 +3181,26 @@ function driveThumbnailUrl(url?: string) {
 function driveViewUrl(url?: string) {
   const id = driveFileId(url);
   return id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : '';
+}
+
+function issueStatusLabel(status: IssueStatus) {
+  const labels: Record<IssueStatus, string> = {
+    open: 'Open',
+    in_progress: 'In Progress',
+    resolved: 'Resolved',
+    closed: 'Closed',
+  };
+  return labels[status];
+}
+
+function issuePriorityLabel(priority: IssuePriority) {
+  const labels: Record<IssuePriority, string> = {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    urgent: 'Urgent',
+  };
+  return labels[priority];
 }
 
 function buildVipRecap(sessions: VipSession[]) {

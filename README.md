@@ -26,6 +26,8 @@ http://127.0.0.1:5173
 - Master item, HPP, default qty, status aktif/nonaktif.
 - Master staff, role, template checklist, dan item checklist.
 - Report checklist dengan detail item dan foto bukti.
+- Issue tracking dari item checklist yang bermasalah.
+- Follow up issue dengan status, priority, assignee, dan komentar.
 - Export CSV.
 - Persistence lokal via localStorage sebagai fallback.
 - Sync database via Supabase.
