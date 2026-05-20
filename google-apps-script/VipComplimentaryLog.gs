@@ -3,11 +3,28 @@ const SHEETS = {
   staff: 'Staff',
   sessions: 'Sessions',
   sessionItems: 'SessionItems',
+  roles: 'Roles',
+  checklistTemplates: 'ChecklistTemplates',
+  checklistTemplateItems: 'ChecklistTemplateItems',
+  checklistRuns: 'ChecklistRuns',
+  checklistRunItems: 'ChecklistRunItems',
+  photoUploads: 'PhotoUploads',
+  settings: 'Settings',
 };
 
 const HEADERS = {
   items: ['id', 'name', 'category', 'hpp', 'defaultQty', 'active'],
-  staff: ['id', 'name', 'active'],
+  staff: [
+    'staffId',
+    'staffName',
+    'roleId',
+    'openingTemplateId',
+    'closingTemplateId',
+    'isActive',
+    'permissionLevel',
+    'createdAt',
+    'updatedAt',
+  ],
   sessions: ['id', 'date', 'startTime', 'endTime', 'bookingName', 'room', 'staffName', 'status', 'notes', 'createdAt', 'updatedAt'],
   sessionItems: [
     'sessionId',
@@ -22,18 +39,70 @@ const HEADERS = {
     'totalCost',
     'majooInputDone',
   ],
+  roles: ['roleId', 'roleName', 'description', 'isActive', 'createdAt', 'updatedAt'],
+  checklistTemplates: ['templateId', 'templateName', 'templateType', 'roleId', 'description', 'isActive', 'createdAt', 'updatedAt'],
+  checklistTemplateItems: [
+    'templateItemId',
+    'templateId',
+    'itemName',
+    'itemDescription',
+    'sortOrder',
+    'photoRequired',
+    'noteRequired',
+    'isActive',
+    'createdAt',
+    'updatedAt',
+  ],
+  checklistRuns: [
+    'runId',
+    'date',
+    'staffId',
+    'staffName',
+    'roleId',
+    'roleName',
+    'templateId',
+    'templateName',
+    'templateType',
+    'status',
+    'startedAt',
+    'completedAt',
+    'createdAt',
+    'updatedAt',
+  ],
+  checklistRunItems: [
+    'runItemId',
+    'runId',
+    'templateItemId',
+    'itemName',
+    'itemDescription',
+    'status',
+    'note',
+    'photoUrl',
+    'photoThumbnailUrl',
+    'photoRequired',
+    'noteRequired',
+    'completedAt',
+    'createdAt',
+    'updatedAt',
+  ],
+  photoUploads: ['photoId', 'runId', 'runItemId', 'staffId', 'staffName', 'fileName', 'fileUrl', 'thumbnailUrl', 'uploadedAt'],
+  settings: ['key', 'value'],
 };
+
+const PHOTO_ROOT_FOLDER = 'Nomono Staff Checklist';
 
 function setupOnce() {
   ensureSheets_();
-  return 'VIP Complimentary Log sheet setup complete';
+  ensureFolder_(PHOTO_ROOT_FOLDER);
+  return 'Nomono VIP + Staff SOP Checklist setup complete';
 }
 
 function doGet(e) {
   try {
     ensureSheets_();
-    const response = { ok: true, data: readStore_() };
-    return output_(response, e && e.parameter && e.parameter.callback);
+    const action = String((e && e.parameter && e.parameter.action) || 'read');
+    if (action !== 'read') throw new Error('Unsupported action');
+    return output_({ ok: true, data: readStore_() }, e && e.parameter && e.parameter.callback);
   } catch (err) {
     return output_({ ok: false, error: String(err && err.message ? err.message : err) }, e && e.parameter && e.parameter.callback);
   }
@@ -43,9 +112,19 @@ function doPost(e) {
   try {
     ensureSheets_();
     const body = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
-    if (body.action !== 'write') throw new Error('Unsupported action');
-    writeStore_(body.data || {});
-    return output_({ ok: true, savedAt: new Date().toISOString() });
+
+    if (body.action === 'write') {
+      writeStore_(body.data || {});
+      return output_({ ok: true, savedAt: new Date().toISOString() });
+    }
+
+    if (body.action === 'uploadPhoto') {
+      const uploaded = savePhoto_(body);
+      appendPhotoUpload_(uploaded);
+      return output_({ ok: true, fileUrl: uploaded.fileUrl, thumbnailUrl: uploaded.thumbnailUrl, uploadedAt: uploaded.uploadedAt });
+    }
+
+    throw new Error('Unsupported action');
   } catch (err) {
     return output_({ ok: false, error: String(err && err.message ? err.message : err) });
   }
@@ -83,9 +162,15 @@ function readStore_() {
 
   const staff = readObjects_(SHEETS.staff).map(function (row) {
     return {
-      id: String(row.id || ''),
-      name: String(row.name || ''),
-      active: bool_(row.active),
+      staffId: String(row.staffId || row.id || ''),
+      staffName: String(row.staffName || row.name || ''),
+      roleId: String(row.roleId || ''),
+      openingTemplateId: String(row.openingTemplateId || ''),
+      closingTemplateId: String(row.closingTemplateId || ''),
+      isActive: bool_(row.isActive || row.active),
+      permissionLevel: String(row.permissionLevel || 'Staff'),
+      createdAt: String(row.createdAt || ''),
+      updatedAt: String(row.updatedAt || ''),
     };
   });
 
@@ -129,6 +214,91 @@ function readStore_() {
     items: items,
     staff: staff,
     sessions: sessions,
+    roles: readObjects_(SHEETS.roles).map(function (row) {
+      return {
+        roleId: String(row.roleId || ''),
+        roleName: String(row.roleName || ''),
+        description: String(row.description || ''),
+        isActive: bool_(row.isActive),
+        createdAt: String(row.createdAt || ''),
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }),
+    checklistTemplates: readObjects_(SHEETS.checklistTemplates).map(function (row) {
+      return {
+        templateId: String(row.templateId || ''),
+        templateName: String(row.templateName || ''),
+        templateType: String(row.templateType || 'opening'),
+        roleId: String(row.roleId || ''),
+        description: String(row.description || ''),
+        isActive: bool_(row.isActive),
+        createdAt: String(row.createdAt || ''),
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }),
+    checklistTemplateItems: readObjects_(SHEETS.checklistTemplateItems).map(function (row) {
+      return {
+        templateItemId: String(row.templateItemId || ''),
+        templateId: String(row.templateId || ''),
+        itemName: String(row.itemName || ''),
+        itemDescription: String(row.itemDescription || ''),
+        sortOrder: number_(row.sortOrder),
+        photoRequired: bool_(row.photoRequired),
+        noteRequired: bool_(row.noteRequired),
+        isActive: bool_(row.isActive),
+        createdAt: String(row.createdAt || ''),
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }),
+    checklistRuns: readObjects_(SHEETS.checklistRuns).map(function (row) {
+      return {
+        runId: String(row.runId || ''),
+        date: String(row.date || ''),
+        staffId: String(row.staffId || ''),
+        staffName: String(row.staffName || ''),
+        roleId: String(row.roleId || ''),
+        roleName: String(row.roleName || ''),
+        templateId: String(row.templateId || ''),
+        templateName: String(row.templateName || ''),
+        templateType: String(row.templateType || 'opening'),
+        status: String(row.status || 'in_progress'),
+        startedAt: String(row.startedAt || ''),
+        completedAt: String(row.completedAt || ''),
+        createdAt: String(row.createdAt || ''),
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }),
+    checklistRunItems: readObjects_(SHEETS.checklistRunItems).map(function (row) {
+      return {
+        runItemId: String(row.runItemId || ''),
+        runId: String(row.runId || ''),
+        templateItemId: String(row.templateItemId || ''),
+        itemName: String(row.itemName || ''),
+        itemDescription: String(row.itemDescription || ''),
+        status: String(row.status || 'pending'),
+        note: String(row.note || ''),
+        photoUrl: String(row.photoUrl || ''),
+        photoThumbnailUrl: String(row.photoThumbnailUrl || row.photoUrl || ''),
+        photoRequired: bool_(row.photoRequired),
+        noteRequired: bool_(row.noteRequired),
+        completedAt: String(row.completedAt || ''),
+        createdAt: String(row.createdAt || ''),
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }),
+    photoUploads: readObjects_(SHEETS.photoUploads).map(function (row) {
+      return {
+        photoId: String(row.photoId || ''),
+        runId: String(row.runId || ''),
+        runItemId: String(row.runItemId || ''),
+        staffId: String(row.staffId || ''),
+        staffName: String(row.staffName || ''),
+        fileName: String(row.fileName || ''),
+        fileUrl: String(row.fileUrl || ''),
+        thumbnailUrl: String(row.thumbnailUrl || row.fileUrl || ''),
+        uploadedAt: String(row.uploadedAt || ''),
+      };
+    }),
   };
 }
 
@@ -136,13 +306,54 @@ function writeStore_(data) {
   const items = Array.isArray(data.items) ? data.items : [];
   const staff = Array.isArray(data.staff) ? data.staff : [];
   const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  const roles = Array.isArray(data.roles) ? data.roles : [];
+  const checklistTemplates = Array.isArray(data.checklistTemplates) ? data.checklistTemplates : [];
+  const checklistTemplateItems = Array.isArray(data.checklistTemplateItems) ? data.checklistTemplateItems : [];
+  const checklistRuns = Array.isArray(data.checklistRuns) ? data.checklistRuns : [];
+  const checklistRunItems = Array.isArray(data.checklistRunItems) ? data.checklistRunItems : [];
+  const photoUploads = Array.isArray(data.photoUploads) ? data.photoUploads : [];
+
+  const runById = {};
+  checklistRuns.forEach(function (run) {
+    runById[run.runId] = run;
+  });
+
+  const normalizedRunItems = checklistRunItems.map(function (item) {
+    if (item.photoDataUrl && !item.photoUrl) {
+      const run = runById[item.runId] || {};
+      const uploaded = savePhoto_({
+        dataUrl: item.photoDataUrl,
+        fileName: item.photoFileName || buildPhotoFileName_(run, item),
+        runId: item.runId,
+        runItemId: item.runItemId,
+        staffId: run.staffId || '',
+        staffName: run.staffName || '',
+        templateType: run.templateType || 'Checklist',
+        date: run.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      });
+      item.photoUrl = uploaded.fileUrl;
+      item.photoThumbnailUrl = uploaded.thumbnailUrl;
+      photoUploads.push(uploaded);
+    }
+    return item;
+  });
 
   writeRows_(SHEETS.items, HEADERS.items, items.map(function (item) {
     return [item.id, item.name, item.category, item.hpp, item.defaultQty, item.active === true];
   }));
 
   writeRows_(SHEETS.staff, HEADERS.staff, staff.map(function (person) {
-    return [person.id, person.name, person.active === true];
+    return [
+      person.staffId,
+      person.staffName,
+      person.roleId,
+      person.openingTemplateId,
+      person.closingTemplateId,
+      person.isActive === true,
+      person.permissionLevel || 'Staff',
+      person.createdAt || '',
+      person.updatedAt || '',
+    ];
   }));
 
   writeRows_(SHEETS.sessions, HEADERS.sessions, sessions.map(function (session) {
@@ -180,6 +391,150 @@ function writeStore_(data) {
     });
   });
   writeRows_(SHEETS.sessionItems, HEADERS.sessionItems, sessionItemRows);
+
+  writeRows_(SHEETS.roles, HEADERS.roles, roles.map(function (role) {
+    return [role.roleId, role.roleName, role.description, role.isActive === true, role.createdAt || '', role.updatedAt || ''];
+  }));
+
+  writeRows_(SHEETS.checklistTemplates, HEADERS.checklistTemplates, checklistTemplates.map(function (template) {
+    return [
+      template.templateId,
+      template.templateName,
+      template.templateType,
+      template.roleId,
+      template.description || '',
+      template.isActive === true,
+      template.createdAt || '',
+      template.updatedAt || '',
+    ];
+  }));
+
+  writeRows_(SHEETS.checklistTemplateItems, HEADERS.checklistTemplateItems, checklistTemplateItems.map(function (item) {
+    return [
+      item.templateItemId,
+      item.templateId,
+      item.itemName,
+      item.itemDescription || '',
+      item.sortOrder,
+      item.photoRequired === true,
+      item.noteRequired === true,
+      item.isActive === true,
+      item.createdAt || '',
+      item.updatedAt || '',
+    ];
+  }));
+
+  writeRows_(SHEETS.checklistRuns, HEADERS.checklistRuns, checklistRuns.map(function (run) {
+    return [
+      run.runId,
+      run.date,
+      run.staffId,
+      run.staffName,
+      run.roleId,
+      run.roleName,
+      run.templateId,
+      run.templateName,
+      run.templateType,
+      run.status,
+      run.startedAt || '',
+      run.completedAt || '',
+      run.createdAt || '',
+      run.updatedAt || '',
+    ];
+  }));
+
+  writeRows_(SHEETS.checklistRunItems, HEADERS.checklistRunItems, normalizedRunItems.map(function (item) {
+    return [
+      item.runItemId,
+      item.runId,
+      item.templateItemId,
+      item.itemName,
+      item.itemDescription || '',
+      item.status,
+      item.note || '',
+      item.photoUrl || '',
+      item.photoThumbnailUrl || item.photoUrl || '',
+      item.photoRequired === true,
+      item.noteRequired === true,
+      item.completedAt || '',
+      item.createdAt || '',
+      item.updatedAt || '',
+    ];
+  }));
+
+  const uniqueUploads = {};
+  photoUploads.forEach(function (photo) {
+    uniqueUploads[photo.runItemId || photo.photoId] = photo;
+  });
+  writeRows_(SHEETS.photoUploads, HEADERS.photoUploads, Object.keys(uniqueUploads).map(function (key) {
+    const photo = uniqueUploads[key];
+    return [
+      photo.photoId || Utilities.getUuid(),
+      photo.runId || '',
+      photo.runItemId || '',
+      photo.staffId || '',
+      photo.staffName || '',
+      photo.fileName || '',
+      photo.fileUrl || '',
+      photo.thumbnailUrl || photo.fileUrl || '',
+      photo.uploadedAt || '',
+    ];
+  }));
+}
+
+function savePhoto_(payload) {
+  if (!payload.dataUrl) throw new Error('Photo dataUrl is required');
+
+  const matches = String(payload.dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!matches) throw new Error('Invalid image data');
+
+  const contentType = matches[1];
+  const bytes = Utilities.base64Decode(matches[2]);
+  const date = String(payload.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+  const month = date.slice(0, 7);
+  const typeFolder = titleCase_(String(payload.templateType || 'Checklist'));
+  const folder = ensureFolderPath_([PHOTO_ROOT_FOLDER, month, typeFolder]);
+  const fileName = sanitizeFileName_(payload.fileName || date + '_' + payload.staffName + '_' + payload.runItemId + '.jpg');
+  const blob = Utilities.newBlob(bytes, contentType, fileName);
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  const fileId = file.getId();
+  const fileUrl = file.getUrl();
+  const thumbnailUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+  const uploadedAt = new Date().toISOString();
+
+  return {
+    photoId: Utilities.getUuid(),
+    runId: String(payload.runId || ''),
+    runItemId: String(payload.runItemId || ''),
+    staffId: String(payload.staffId || ''),
+    staffName: String(payload.staffName || ''),
+    fileName: fileName,
+    fileUrl: fileUrl,
+    thumbnailUrl: thumbnailUrl,
+    uploadedAt: uploadedAt,
+  };
+}
+
+function appendPhotoUpload_(photo) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.photoUploads);
+  sheet.appendRow([
+    photo.photoId,
+    photo.runId,
+    photo.runItemId,
+    photo.staffId,
+    photo.staffName,
+    photo.fileName,
+    photo.fileUrl,
+    photo.thumbnailUrl,
+    photo.uploadedAt,
+  ]);
+}
+
+function buildPhotoFileName_(run, item) {
+  const date = run.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return sanitizeFileName_([date, run.staffName || 'Staff', run.templateType || 'Checklist', item.itemName || item.runItemId].join('_') + '.jpg');
 }
 
 function readObjects_(sheetName) {
@@ -208,10 +563,34 @@ function writeRows_(sheetName, headers, rows) {
   sheet.getRange(1, 1, Math.max(rows.length + 1, 2), headers.length).setNumberFormat('@');
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.setFrozenRows(1);
-  if (rows.length) {
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  }
+  if (rows.length) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.autoResizeColumns(1, headers.length);
+}
+
+function ensureFolderPath_(parts) {
+  let folder = ensureFolder_(parts[0]);
+  for (let i = 1; i < parts.length; i += 1) {
+    const iterator = folder.getFoldersByName(parts[i]);
+    folder = iterator.hasNext() ? iterator.next() : folder.createFolder(parts[i]);
+  }
+  return folder;
+}
+
+function ensureFolder_(name) {
+  const iterator = DriveApp.getFoldersByName(name);
+  return iterator.hasNext() ? iterator.next() : DriveApp.createFolder(name);
+}
+
+function sanitizeFileName_(value) {
+  return String(value || 'photo.jpg')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .slice(0, 160);
+}
+
+function titleCase_(value) {
+  const raw = String(value || 'Checklist');
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
 
 function number_(value) {
@@ -225,9 +604,7 @@ function bool_(value) {
 
 function output_(payload, callback) {
   if (callback && /^[A-Za-z0-9_.$]+$/.test(callback)) {
-    return ContentService.createTextOutput(callback + '(' + JSON.stringify(payload) + ');').setMimeType(
-      ContentService.MimeType.JAVASCRIPT,
-    );
+    return ContentService.createTextOutput(callback + '(' + JSON.stringify(payload) + ');').setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
   return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
 }

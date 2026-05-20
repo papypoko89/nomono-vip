@@ -1,38 +1,41 @@
 import {
+  AlertTriangle,
   BarChart3,
-  CalendarDays,
+  Camera,
   Check,
-  ChevronRight,
+  ChevronDown,
+  ClipboardCheck,
   ClipboardList,
   Download,
-  Edit3,
-  History,
+  Eye,
+  FileText,
+  Image,
+  ListChecks,
   Package,
   Plus,
+  RotateCcw,
   Save,
   Settings2,
   Trash2,
+  Upload,
   UserRound,
+  UsersRound,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type Tab = 'input' | 'log' | 'recap' | 'master';
-type SessionStatus = 'draft' | 'completed';
-type LogFilter = 'today' | 'month' | 'custom' | 'notMajoo';
+type Tab = 'vip' | 'checklist' | 'report' | 'master';
+type TemplateType = 'opening' | 'closing' | 'custom';
+type RunStatus = 'not_started' | 'in_progress' | 'completed' | 'has_issue';
+type RunItemStatus = 'pending' | 'done' | 'issue' | 'skipped';
+type PermissionLevel = 'Staff' | 'Supervisor' | 'Manager';
 
-type Item = {
+type VipItem = {
   id: string;
   name: string;
   category: string;
   hpp: number;
   defaultQty: number;
-  active: boolean;
-};
-
-type Staff = {
-  id: string;
-  name: string;
   active: boolean;
 };
 
@@ -57,15 +60,108 @@ type VipSession = {
   bookingName: string;
   room: string;
   staffName: string;
-  status: SessionStatus;
+  status: 'draft' | 'completed';
   notes?: string;
   createdAt: string;
   updatedAt: string;
   items: VipSessionItem[];
 };
 
-type SessionForm = Omit<VipSession, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'items'> & {
+type VipForm = Omit<VipSession, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'items'> & {
   items: VipSessionItem[];
+};
+
+type Role = {
+  roleId: string;
+  roleName: string;
+  description: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Staff = {
+  staffId: string;
+  staffName: string;
+  roleId: string;
+  openingTemplateId: string;
+  closingTemplateId: string;
+  isActive: boolean;
+  permissionLevel: PermissionLevel;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ChecklistTemplate = {
+  templateId: string;
+  templateName: string;
+  templateType: TemplateType;
+  roleId: string;
+  description: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ChecklistTemplateItem = {
+  templateItemId: string;
+  templateId: string;
+  itemName: string;
+  itemDescription: string;
+  sortOrder: number;
+  photoRequired: boolean;
+  noteRequired: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ChecklistRun = {
+  runId: string;
+  date: string;
+  staffId: string;
+  staffName: string;
+  roleId: string;
+  roleName: string;
+  templateId: string;
+  templateName: string;
+  templateType: TemplateType;
+  status: RunStatus;
+  startedAt: string;
+  completedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ChecklistRunItem = {
+  runItemId: string;
+  runId: string;
+  templateItemId: string;
+  itemName: string;
+  itemDescription: string;
+  status: RunItemStatus;
+  note: string;
+  photoUrl: string;
+  photoThumbnailUrl: string;
+  photoDataUrl?: string;
+  photoFileName?: string;
+  photoRequired: boolean;
+  noteRequired: boolean;
+  completedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PhotoUpload = {
+  photoId: string;
+  runId: string;
+  runItemId: string;
+  staffId: string;
+  staffName: string;
+  fileName: string;
+  fileUrl: string;
+  thumbnailUrl: string;
+  uploadedAt: string;
 };
 
 type SyncSettings = {
@@ -74,45 +170,182 @@ type SyncSettings = {
   lastSyncedAt?: string;
 };
 
+type ToastMessage = {
+  id: string;
+  title: string;
+  body?: string;
+  tone: 'success' | 'info' | 'warning';
+};
+
 type AppStore = {
-  items: Item[];
+  items: VipItem[];
   staff: Staff[];
   sessions: VipSession[];
+  roles: Role[];
+  checklistTemplates: ChecklistTemplate[];
+  checklistTemplateItems: ChecklistTemplateItem[];
+  checklistRuns: ChecklistRun[];
+  checklistRunItems: ChecklistRunItem[];
+  photoUploads: PhotoUpload[];
   sync: SyncSettings;
 };
 
-const DEFAULT_ITEMS: Item[] = [
+const STORAGE_KEY = 'nomono.vip-complimentary-log.v2';
+const LEGACY_STORAGE_KEY = 'nomono.vip-complimentary-log.v1';
+const DEFAULT_SHEET_ENDPOINT =
+  'https://script.google.com/macros/s/AKfycbzCWhlBw9OFcUjhcqHj0_A5LgW15cdGk4ss4C3KCl6v0CGHSM_RQP_gv7mlzo5IBAwkgA/exec';
+
+const DEFAULT_ITEMS: VipItem[] = [
   { id: 'item-aqua-600', name: 'Aqua 600ml', category: 'Minuman', hpp: 2500, defaultQty: 6, active: true },
   { id: 'item-pocari-500', name: 'Pocari Sweat 500ml', category: 'Minuman', hpp: 6000, defaultQty: 2, active: true },
   { id: 'item-mizone-500', name: 'Mizone 500ml', category: 'Minuman', hpp: 5000, defaultQty: 2, active: true },
   { id: 'item-coconut-rtd', name: 'Coconut RTD', category: 'Minuman', hpp: 8000, defaultQty: 2, active: true },
 ];
 
-const DEFAULT_STAFF: Staff[] = [
-  { id: 'staff-1', name: 'Staff 1', active: true },
-  { id: 'staff-2', name: 'Staff 2', active: true },
-  { id: 'staff-supervisor', name: 'Supervisor', active: true },
+const seedTime = '2026-05-20T00:00:00.000Z';
+
+const DEFAULT_ROLES: Role[] = [
+  {
+    roleId: 'role-kasir',
+    roleName: 'Kasir / Resepsionis',
+    description: 'Front desk, POS, booking, QRIS, dan tamu.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+  {
+    roleId: 'role-runner',
+    roleName: 'Runner / All Around',
+    description: 'Support operasional venue, lobby, dan court.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+  {
+    roleId: 'role-manager',
+    roleName: 'Manager',
+    description: 'Monitoring opening, closing, dan issue harian.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
 ];
 
-const STORAGE_KEY = 'nomono.vip-complimentary-log.v1';
-const DEFAULT_SHEET_ENDPOINT =
-  'https://script.google.com/macros/s/AKfycbzCWhlBw9OFcUjhcqHj0_A5LgW15cdGk4ss4C3KCl6v0CGHSM_RQP_gv7mlzo5IBAwkgA/exec';
-const DEFAULT_SYNC: SyncSettings = {
-  sheetEndpoint: DEFAULT_SHEET_ENDPOINT,
-  autoSync: true,
-};
-const BOOKING_TIME_OPTIONS = Array.from({ length: 25 }, (_, hour) => {
-  const value = `${String(hour).padStart(2, '0')}:00`;
+const DEFAULT_TEMPLATES: ChecklistTemplate[] = [
+  {
+    templateId: 'tpl-opening-kasir-1',
+    templateName: 'Opening Kasir 1',
+    templateType: 'opening',
+    roleId: 'role-kasir',
+    description: 'Checklist opening untuk kasir utama.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+  {
+    templateId: 'tpl-closing-kasir-1',
+    templateName: 'Closing Kasir 1',
+    templateType: 'closing',
+    roleId: 'role-kasir',
+    description: 'Checklist closing kasir.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+  {
+    templateId: 'tpl-opening-runner',
+    templateName: 'Opening Runner',
+    templateType: 'opening',
+    roleId: 'role-runner',
+    description: 'Checklist opening runner/all around.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+  {
+    templateId: 'tpl-closing-runner',
+    templateName: 'Closing Runner',
+    templateType: 'closing',
+    roleId: 'role-runner',
+    description: 'Checklist closing runner/all around.',
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  },
+];
+
+const DEFAULT_TEMPLATE_ITEMS: ChecklistTemplateItem[] = [
+  templateItem('tpl-opening-kasir-1', 'Nyalakan POS', 'Pastikan POS menyala dan bisa dipakai transaksi.', 1, false, false),
+  templateItem('tpl-opening-kasir-1', 'Cek uang modal kasir', 'Hitung uang modal awal dan cocokkan dengan nominal standar.', 2, true, true),
+  templateItem('tpl-opening-kasir-1', 'Cek printer struk', 'Pastikan kertas tersedia dan test print berhasil.', 3, false, false),
+  templateItem('tpl-opening-kasir-1', 'Cek QRIS', 'Pastikan QRIS/EDC siap dipakai.', 4, false, false),
+  templateItem('tpl-opening-kasir-1', 'Cek booking hari ini', 'Review jadwal court dan VIP room hari ini.', 5, false, false),
+  templateItem('tpl-closing-kasir-1', 'Rekap transaksi kasir', 'Cocokkan POS, QRIS, dan catatan manual.', 1, false, true),
+  templateItem('tpl-closing-kasir-1', 'Simpan uang kasir', 'Pastikan uang disimpan sesuai SOP closing.', 2, true, true),
+  templateItem('tpl-closing-kasir-1', 'Matikan POS dan printer', 'Matikan perangkat setelah closing selesai.', 3, false, false),
+  templateItem('tpl-opening-runner', 'Cek area lobby', 'Pastikan lobby bersih dan siap menerima tamu.', 1, true, false),
+  templateItem('tpl-opening-runner', 'Cek area court', 'Pastikan court bersih dan tidak ada barang tertinggal.', 2, true, false),
+  templateItem('tpl-opening-runner', 'Cek stok minuman display', 'Rapikan display dan catat stok yang kurang.', 3, true, true),
+  templateItem('tpl-closing-runner', 'Bersihkan area lobby', 'Pastikan lobby kembali rapi setelah operasional.', 1, true, false),
+  templateItem('tpl-closing-runner', 'Cek lost and found', 'Kumpulkan dan catat barang tertinggal.', 2, false, true),
+  templateItem('tpl-closing-runner', 'Foto kondisi court closing', 'Ambil foto kondisi court setelah dibersihkan.', 3, true, false),
+];
+
+const DEFAULT_STAFF: Staff[] = [
+  staffSeed('staff-1', 'Staff 1', 'role-kasir', 'tpl-opening-kasir-1', 'tpl-closing-kasir-1', 'Staff'),
+  staffSeed('staff-2', 'Staff 2', 'role-runner', 'tpl-opening-runner', 'tpl-closing-runner', 'Staff'),
+  staffSeed('staff-supervisor', 'Supervisor', 'role-manager', '', '', 'Manager'),
+];
+
+function templateItem(
+  templateId: string,
+  itemName: string,
+  itemDescription: string,
+  sortOrder: number,
+  photoRequired: boolean,
+  noteRequired: boolean,
+): ChecklistTemplateItem {
   return {
-    value,
-    label: value.replace(':', '.'),
+    templateItemId: `${templateId}-${sortOrder}`,
+    templateId,
+    itemName,
+    itemDescription,
+    sortOrder,
+    photoRequired,
+    noteRequired,
+    isActive: true,
+    createdAt: seedTime,
+    updatedAt: seedTime,
   };
-});
+}
+
+function staffSeed(
+  staffId: string,
+  staffName: string,
+  roleId: string,
+  openingTemplateId: string,
+  closingTemplateId: string,
+  permissionLevel: PermissionLevel,
+): Staff {
+  return {
+    staffId,
+    staffName,
+    roleId,
+    openingTemplateId,
+    closingTemplateId,
+    isActive: true,
+    permissionLevel,
+    createdAt: seedTime,
+    updatedAt: seedTime,
+  };
+}
 
 const uid = () => {
   if ('crypto' in window && 'randomUUID' in window.crypto) return window.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
+
+const nowIso = () => new Date().toISOString();
 
 const todayISO = () => {
   const now = new Date();
@@ -120,15 +353,19 @@ const todayISO = () => {
   return now.toISOString().slice(0, 10);
 };
 
-const currentTime = () => `${String(new Date().getHours()).padStart(2, '0')}:00`;
+const timeNow = () =>
+  new Date().toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 
-const addHours = (time: string, hours: number) => {
-  const [rawHour, rawMinute] = time.split(':').map(Number);
-  const hour = Number.isFinite(rawHour) ? rawHour : 0;
-  const minute = Number.isFinite(rawMinute) ? rawMinute : 0;
-  const nextHour = Math.min(24, hour + hours);
-  return `${String(nextHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-};
+const niceDate = (date: string) =>
+  new Date(`${date}T00:00:00`).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 
 const rupiah = (value: number) =>
   new Intl.NumberFormat('id-ID', {
@@ -137,59 +374,310 @@ const rupiah = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value);
 
-const niceDate = (value: string) =>
-  new Date(`${value}T00:00:00`).toLocaleDateString('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
+const emptyStore = (): AppStore => ({
+  items: DEFAULT_ITEMS,
+  staff: DEFAULT_STAFF,
+  sessions: [],
+  roles: DEFAULT_ROLES,
+  checklistTemplates: DEFAULT_TEMPLATES,
+  checklistTemplateItems: DEFAULT_TEMPLATE_ITEMS,
+  checklistRuns: [],
+  checklistRunItems: [],
+  photoUploads: [],
+  sync: {
+    sheetEndpoint: DEFAULT_SHEET_ENDPOINT,
+    autoSync: true,
+  },
+});
 
-const monthKey = (date: string) => date.slice(0, 7);
+function normalizeStore(value: unknown): AppStore {
+  const parsed = (value && typeof value === 'object' ? value : {}) as Partial<AppStore> & {
+    staff?: Array<Partial<Staff> & { id?: string; name?: string; active?: boolean }>;
+  };
+  const roles = Array.isArray(parsed.roles) && parsed.roles.length ? parsed.roles.map(normalizeRole) : DEFAULT_ROLES;
+  const templates =
+    Array.isArray(parsed.checklistTemplates) && parsed.checklistTemplates.length
+      ? parsed.checklistTemplates.map(normalizeTemplate)
+      : DEFAULT_TEMPLATES;
 
-const normalizeDateValue = (value: unknown) => {
+  return {
+    items: Array.isArray(parsed.items) && parsed.items.length ? parsed.items.map(normalizeVipItem) : DEFAULT_ITEMS,
+    staff: Array.isArray(parsed.staff) && parsed.staff.length ? parsed.staff.map((person) => normalizeStaff(person, roles, templates)) : DEFAULT_STAFF,
+    sessions: Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [],
+    roles,
+    checklistTemplates: templates,
+    checklistTemplateItems:
+      Array.isArray(parsed.checklistTemplateItems) && parsed.checklistTemplateItems.length
+        ? parsed.checklistTemplateItems.map(normalizeTemplateItem)
+        : DEFAULT_TEMPLATE_ITEMS,
+    checklistRuns: Array.isArray(parsed.checklistRuns) ? parsed.checklistRuns.map(normalizeRun) : [],
+    checklistRunItems: Array.isArray(parsed.checklistRunItems) ? parsed.checklistRunItems.map(normalizeRunItem) : [],
+    photoUploads: Array.isArray(parsed.photoUploads) ? parsed.photoUploads.map(normalizePhotoUpload) : [],
+    sync: {
+      sheetEndpoint: parsed.sync?.sheetEndpoint ?? DEFAULT_SHEET_ENDPOINT,
+      autoSync: true,
+      lastSyncedAt: parsed.sync?.lastSyncedAt,
+    },
+  };
+}
+
+function normalizeVipItem(item: Partial<VipItem>): VipItem {
+  return {
+    id: String(item.id || uid()),
+    name: String(item.name || ''),
+    category: String(item.category || 'Minuman'),
+    hpp: Math.max(0, Number(item.hpp) || 0),
+    defaultQty: Math.max(0, Math.trunc(Number(item.defaultQty) || 0)),
+    active: item.active !== false,
+  };
+}
+
+function normalizeSession(session: Partial<VipSession>): VipSession {
+  return {
+    id: String(session.id || uid()),
+    date: normalizeDate(session.date),
+    startTime: String(session.startTime || '08:00'),
+    endTime: String(session.endTime || '09:00'),
+    bookingName: String(session.bookingName || ''),
+    room: String(session.room || 'VIP Room'),
+    staffName: String(session.staffName || ''),
+    status: session.status === 'draft' ? 'draft' : 'completed',
+    notes: String(session.notes || ''),
+    createdAt: String(session.createdAt || nowIso()),
+    updatedAt: String(session.updatedAt || nowIso()),
+    items: Array.isArray(session.items) ? session.items.map((item) => calculateLine(item as VipSessionItem)) : [],
+  };
+}
+
+function normalizeRole(role: Partial<Role>): Role {
+  return {
+    roleId: String(role.roleId || uid()),
+    roleName: String(role.roleName || ''),
+    description: String(role.description || ''),
+    isActive: role.isActive !== false,
+    createdAt: String(role.createdAt || nowIso()),
+    updatedAt: String(role.updatedAt || nowIso()),
+  };
+}
+
+function normalizeStaff(
+  person: Partial<Staff> & { id?: string; name?: string; active?: boolean },
+  roles: Role[],
+  templates: ChecklistTemplate[],
+): Staff {
+  const roleId = String(person.roleId || roles[0]?.roleId || '');
+  const openingTemplateId = String(
+    person.openingTemplateId || templates.find((template) => template.templateType === 'opening' && template.roleId === roleId)?.templateId || '',
+  );
+  const closingTemplateId = String(
+    person.closingTemplateId || templates.find((template) => template.templateType === 'closing' && template.roleId === roleId)?.templateId || '',
+  );
+  return {
+    staffId: String(person.staffId || person.id || uid()),
+    staffName: String(person.staffName || person.name || ''),
+    roleId,
+    openingTemplateId,
+    closingTemplateId,
+    isActive: person.isActive ?? person.active ?? true,
+    permissionLevel: normalizePermission(person.permissionLevel),
+    createdAt: String(person.createdAt || nowIso()),
+    updatedAt: String(person.updatedAt || nowIso()),
+  };
+}
+
+function normalizePermission(value: unknown): PermissionLevel {
+  if (value === 'Manager' || value === 'Supervisor') return value;
+  return 'Staff';
+}
+
+function normalizeTemplate(template: Partial<ChecklistTemplate>): ChecklistTemplate {
+  return {
+    templateId: String(template.templateId || uid()),
+    templateName: String(template.templateName || ''),
+    templateType: normalizeTemplateType(template.templateType),
+    roleId: String(template.roleId || ''),
+    description: String(template.description || ''),
+    isActive: template.isActive !== false,
+    createdAt: String(template.createdAt || nowIso()),
+    updatedAt: String(template.updatedAt || nowIso()),
+  };
+}
+
+function normalizeTemplateType(value: unknown): TemplateType {
+  if (value === 'closing' || value === 'custom') return value;
+  return 'opening';
+}
+
+function normalizeTemplateItem(item: Partial<ChecklistTemplateItem>): ChecklistTemplateItem {
+  return {
+    templateItemId: String(item.templateItemId || uid()),
+    templateId: String(item.templateId || ''),
+    itemName: String(item.itemName || ''),
+    itemDescription: String(item.itemDescription || ''),
+    sortOrder: Math.max(1, Number(item.sortOrder) || 1),
+    photoRequired: item.photoRequired === true,
+    noteRequired: item.noteRequired === true,
+    isActive: item.isActive !== false,
+    createdAt: String(item.createdAt || nowIso()),
+    updatedAt: String(item.updatedAt || nowIso()),
+  };
+}
+
+function normalizeRun(run: Partial<ChecklistRun>): ChecklistRun {
+  return {
+    runId: String(run.runId || uid()),
+    date: normalizeDate(run.date),
+    staffId: String(run.staffId || ''),
+    staffName: String(run.staffName || ''),
+    roleId: String(run.roleId || ''),
+    roleName: String(run.roleName || ''),
+    templateId: String(run.templateId || ''),
+    templateName: String(run.templateName || ''),
+    templateType: normalizeTemplateType(run.templateType),
+    status: normalizeRunStatus(run.status),
+    startedAt: String(run.startedAt || ''),
+    completedAt: String(run.completedAt || ''),
+    createdAt: String(run.createdAt || nowIso()),
+    updatedAt: String(run.updatedAt || nowIso()),
+  };
+}
+
+function normalizeRunStatus(value: unknown): RunStatus {
+  if (value === 'not_started' || value === 'completed' || value === 'has_issue') return value;
+  return 'in_progress';
+}
+
+function normalizeRunItem(item: Partial<ChecklistRunItem>): ChecklistRunItem {
+  return {
+    runItemId: String(item.runItemId || uid()),
+    runId: String(item.runId || ''),
+    templateItemId: String(item.templateItemId || ''),
+    itemName: String(item.itemName || ''),
+    itemDescription: String(item.itemDescription || ''),
+    status: normalizeRunItemStatus(item.status),
+    note: String(item.note || ''),
+    photoUrl: String(item.photoUrl || ''),
+    photoThumbnailUrl: String(item.photoThumbnailUrl || item.photoUrl || ''),
+    photoDataUrl: item.photoDataUrl ? String(item.photoDataUrl) : undefined,
+    photoFileName: item.photoFileName ? String(item.photoFileName) : undefined,
+    photoRequired: item.photoRequired === true,
+    noteRequired: item.noteRequired === true,
+    completedAt: String(item.completedAt || ''),
+    createdAt: String(item.createdAt || nowIso()),
+    updatedAt: String(item.updatedAt || nowIso()),
+  };
+}
+
+function normalizeRunItemStatus(value: unknown): RunItemStatus {
+  if (value === 'done' || value === 'issue' || value === 'skipped') return value;
+  return 'pending';
+}
+
+function normalizePhotoUpload(photo: Partial<PhotoUpload>): PhotoUpload {
+  return {
+    photoId: String(photo.photoId || uid()),
+    runId: String(photo.runId || ''),
+    runItemId: String(photo.runItemId || ''),
+    staffId: String(photo.staffId || ''),
+    staffName: String(photo.staffName || ''),
+    fileName: String(photo.fileName || ''),
+    fileUrl: String(photo.fileUrl || ''),
+    thumbnailUrl: String(photo.thumbnailUrl || photo.fileUrl || ''),
+    uploadedAt: String(photo.uploadedAt || nowIso()),
+  };
+}
+
+function normalizeDate(value: unknown) {
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  if (value instanceof Date) {
-    const date = new Date(value);
-    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    return date.toISOString().slice(0, 10);
-  }
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const parsed = new Date(raw);
+  const parsed = new Date(String(value || ''));
   if (!Number.isNaN(parsed.getTime())) {
     parsed.setMinutes(parsed.getMinutes() - parsed.getTimezoneOffset());
     return parsed.toISOString().slice(0, 10);
   }
-  return raw;
-};
+  return todayISO();
+}
 
-const normalizeTimeValue = (value: unknown) => {
-  if (typeof value === 'string' && /^\d{2}:\d{2}$/.test(value)) return value;
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-
-  const fullTime = raw.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
-  if (fullTime) {
-    return `${String(Number(fullTime[1])).padStart(2, '0')}:${fullTime[2]}`;
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return emptyStore();
+    return normalizeStore(JSON.parse(raw));
+  } catch {
+    return emptyStore();
   }
+}
 
-  const ampm = raw.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
-  if (ampm) {
-    let hour = Number(ampm[1]);
-    if (ampm[3].toUpperCase() === 'PM' && hour < 12) hour += 12;
-    if (ampm[3].toUpperCase() === 'AM' && hour === 12) hour = 0;
-    return `${String(hour).padStart(2, '0')}:${ampm[2]}`;
-  }
+function storePayload(store: AppStore) {
+  return {
+    items: store.items,
+    staff: store.staff,
+    sessions: store.sessions,
+    roles: store.roles,
+    checklistTemplates: store.checklistTemplates,
+    checklistTemplateItems: store.checklistTemplateItems,
+    checklistRuns: store.checklistRuns,
+    checklistRunItems: store.checklistRunItems,
+    photoUploads: store.photoUploads,
+  };
+}
 
-  return raw;
-};
+function withQuery(url: string, params: Record<string, string>) {
+  const next = new URL(url);
+  Object.entries(params).forEach(([key, value]) => next.searchParams.set(key, value));
+  return next.toString();
+}
 
-const emptyStore = (): AppStore => ({
-  items: DEFAULT_ITEMS,
-  staff: DEFAULT_STAFF,
-  sessions: [] as VipSession[],
-  sync: DEFAULT_SYNC,
-});
+function readSheetStore(endpoint: string): Promise<AppStore> {
+  return new Promise((resolve, reject) => {
+    const callbackName = `nomonoSheet_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const script = document.createElement('script');
+    const cleanup = () => {
+      delete (window as unknown as Record<string, unknown>)[callbackName];
+      script.remove();
+    };
+
+    (window as unknown as Record<string, (response: { ok?: boolean; data?: unknown; error?: string }) => void>)[callbackName] = (
+      response,
+    ) => {
+      cleanup();
+      if (!response?.ok) {
+        reject(new Error(response?.error || 'Gagal membaca Google Sheet.'));
+        return;
+      }
+      resolve(normalizeStore(response.data));
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('Tidak bisa menghubungi Apps Script URL.'));
+    };
+    script.src = withQuery(endpoint, { action: 'read', callback: callbackName, t: String(Date.now()) });
+    document.body.appendChild(script);
+  });
+}
+
+async function writeSheetStore(endpoint: string, store: AppStore) {
+  await fetch(endpoint, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'write', data: storePayload(store) }),
+  });
+}
+
+async function uploadPhoto(endpoint: string, payload: Record<string, string>) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'uploadPhoto', ...payload }),
+  });
+  const data = (await response.json()) as { ok?: boolean; fileUrl?: string; thumbnailUrl?: string; error?: string };
+  if (!data.ok) throw new Error(data.error || 'Upload foto gagal.');
+  return {
+    fileUrl: data.fileUrl || '',
+    thumbnailUrl: data.thumbnailUrl || data.fileUrl || '',
+  };
+}
 
 function calculateLine(line: VipSessionItem): VipSessionItem {
   const preparedQty = Math.max(0, Math.trunc(Number(line.preparedQty) || 0));
@@ -201,11 +689,11 @@ function calculateLine(line: VipSessionItem): VipSessionItem {
     sealedLeftQty,
     usedQty,
     returnToStockQty: sealedLeftQty,
-    totalCost: usedQty * line.hpp,
+    totalCost: usedQty * (Number(line.hpp) || 0),
   };
 }
 
-function createLine(item: Item): VipSessionItem {
+function createVipLine(item: VipItem): VipSessionItem {
   return calculateLine({
     id: uid(),
     itemId: item.id,
@@ -220,128 +708,53 @@ function createLine(item: Item): VipSessionItem {
   });
 }
 
-function makeForm(items: Item[], staff: Staff[]): SessionForm {
-  const startTime = currentTime();
+function makeVipForm(items: VipItem[], staff: Staff[]): VipForm {
   return {
     date: todayISO(),
-    startTime,
-    endTime: addHours(startTime, 1),
+    startTime: '08:00',
+    endTime: '09:00',
     bookingName: '',
     room: 'VIP Room',
-    staffName: staff.find((person) => person.active)?.name ?? '',
+    staffName: staff.find((person) => person.isActive)?.staffName || '',
     notes: '',
-    items: items.filter((item) => item.active).map(createLine),
+    items: items.filter((item) => item.active).map(createVipLine),
   };
-}
-
-function normalizeStore(value: unknown): AppStore {
-  const parsed = (value && typeof value === 'object' ? value : {}) as Partial<AppStore>;
-  return {
-    items: Array.isArray(parsed.items) && parsed.items.length ? parsed.items : DEFAULT_ITEMS,
-    staff: Array.isArray(parsed.staff) && parsed.staff.length ? parsed.staff : DEFAULT_STAFF,
-    sessions: Array.isArray(parsed.sessions)
-      ? parsed.sessions.map((session) => ({
-          ...session,
-          date: normalizeDateValue(session.date),
-          startTime: normalizeTimeValue(session.startTime),
-          endTime: normalizeTimeValue(session.endTime) || addHours(normalizeTimeValue(session.startTime) || '00:00', 1),
-          items: Array.isArray(session.items) ? session.items.map(calculateLine) : [],
-        }))
-      : [],
-    sync: {
-      ...DEFAULT_SYNC,
-      ...(parsed.sync && typeof parsed.sync === 'object' ? parsed.sync : {}),
-      autoSync: true,
-    },
-  };
-}
-
-function loadStore() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyStore();
-    return normalizeStore(JSON.parse(raw));
-  } catch {
-    return emptyStore();
-  }
-}
-
-function storePayload(store: AppStore) {
-  return {
-    items: store.items,
-    staff: store.staff,
-    sessions: store.sessions,
-  };
-}
-
-function withQuery(url: string, params: Record<string, string>) {
-  const next = new URL(url);
-  Object.entries(params).forEach(([key, value]) => next.searchParams.set(key, value));
-  return next.toString();
-}
-
-function readSheetStore(endpoint: string): Promise<AppStore> {
-  return new Promise((resolve, reject) => {
-    const callbackName = `vipSheetCallback_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const script = document.createElement('script');
-    const cleanup = () => {
-      delete (window as unknown as Record<string, unknown>)[callbackName];
-      script.remove();
-    };
-
-    (window as unknown as Record<string, (response: { ok?: boolean; data?: unknown; error?: string }) => void>)[
-      callbackName
-    ] = (response) => {
-      cleanup();
-      if (!response?.ok) {
-        reject(new Error(response?.error || 'Gagal membaca Google Sheet.'));
-        return;
-      }
-      resolve(normalizeStore(response.data));
-    };
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error('Tidak bisa menghubungi Apps Script URL.'));
-    };
-    script.src = withQuery(endpoint, {
-      action: 'read',
-      callback: callbackName,
-      t: String(Date.now()),
-    });
-    document.body.appendChild(script);
-  });
-}
-
-async function writeSheetStore(endpoint: string, store: AppStore) {
-  await fetch(endpoint, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
-    },
-    body: JSON.stringify({
-      action: 'write',
-      data: storePayload(store),
-    }),
-  });
 }
 
 function App() {
-  const [tab, setTab] = useState<Tab>('input');
-  const [store, setStore] = useState(loadStore);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<SessionForm>(() => makeForm(DEFAULT_ITEMS, DEFAULT_STAFF));
-  const [syncStatus, setSyncStatus] = useState(
-    store.sync.sheetEndpoint ? 'Google Sheet siap disambungkan.' : 'Mode lokal.',
-  );
+  const [tab, setTab] = useState<Tab>('vip');
+  const [store, setStore] = useState<AppStore>(loadStore);
+  const [vipForm, setVipForm] = useState<VipForm>(() => makeVipForm(DEFAULT_ITEMS, DEFAULT_STAFF));
+  const [vipEditingId, setVipEditingId] = useState<string | null>(null);
+  const [selectedStaffId, setSelectedStaffId] = useState(() => localStorage.getItem('nomono.selectedStaffId') || '');
+  const [syncStatus, setSyncStatus] = useState('Google Sheet siap disambungkan.');
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const skipAutoSyncRef = useRef(false);
-  const remoteReadyRef = useRef(false);
   const pendingLocalSyncRef = useRef(false);
+  const remoteReadyRef = useRef(false);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const notify = (title: string, body?: string, tone: ToastMessage['tone'] = 'success') => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast({ id: uid(), title, body, tone });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2400);
+  };
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }, [store]);
+
+  useEffect(() => {
+    localStorage.setItem('nomono.selectedStaffId', selectedStaffId);
+  }, [selectedStaffId]);
+
+  useEffect(() => {
+    setVipForm((current) => ({
+      ...current,
+      staffName: current.staffName || store.staff.find((person) => person.isActive)?.staffName || '',
+      items: current.items.length ? current.items : store.items.filter((item) => item.active).map(createVipLine),
+    }));
+  }, [store.items, store.staff]);
 
   useEffect(() => {
     const endpoint = store.sync.sheetEndpoint.trim();
@@ -353,23 +766,17 @@ function App() {
 
     let cancelled = false;
     setSyncStatus('Memuat database dari Google Sheet...');
-
     readSheetStore(endpoint)
       .then((remote) => {
         if (cancelled) return;
         remoteReadyRef.current = true;
         pendingLocalSyncRef.current = false;
         skipAutoSyncRef.current = true;
-        setStore((current) => ({
-          ...remote,
-          sync: { ...current.sync, lastSyncedAt: new Date().toISOString() },
-        }));
-        setForm(makeForm(remote.items, remote.staff));
+        setStore((current) => ({ ...remote, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
         setSyncStatus('Database Google Sheet sudah dimuat.');
       })
       .catch((error) => {
         if (cancelled) return;
-        remoteReadyRef.current = false;
         setSyncStatus(error instanceof Error ? error.message : 'Gagal memuat Google Sheet. Mode lokal tetap aktif.');
       });
 
@@ -390,131 +797,247 @@ function App() {
       return;
     }
 
-    setSyncStatus('Menunggu auto-sync...');
     const timer = window.setTimeout(async () => {
       try {
         await writeSheetStore(store.sync.sheetEndpoint.trim(), store);
         pendingLocalSyncRef.current = false;
-        setSyncStatus(`Auto-sync tersimpan ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`);
+        setSyncStatus(`Auto-sync tersimpan ${timeNow()}`);
       } catch (error) {
         setSyncStatus(error instanceof Error ? error.message : 'Auto-sync gagal.');
       }
-    }, 1000);
+    }, 900);
 
     return () => window.clearTimeout(timer);
   }, [store]);
 
-  useEffect(() => {
-    if (!editingId) {
-      setForm((current) => ({
-        ...current,
-        staffName: current.staffName || store.staff.find((person) => person.active)?.name || '',
-        items: current.items.length ? current.items : store.items.filter((item) => item.active).map(createLine),
-      }));
-    }
-  }, [store.items, store.staff, editingId]);
-
-  const totals = useMemo(() => getSessionTotals(form.items), [form.items]);
-  const validationErrors = useMemo(() => validateForm(form), [form]);
-
-  const updateStoreFromLocal = (updater: React.SetStateAction<AppStore>) => {
+  const updateStore = (updater: React.SetStateAction<AppStore>) => {
     pendingLocalSyncRef.current = true;
     setStore(updater);
   };
 
-  const saveSession = (status: SessionStatus) => {
-    const errors = validateForm(form);
-    if (errors.length) return;
+  const selectedStaff = store.staff.find((person) => person.staffId === selectedStaffId) || store.staff.find((person) => person.isActive);
 
-    const now = new Date().toISOString();
-    const cleanedItems = form.items.map(calculateLine);
+  const saveVipSession = () => {
+    const errors = validateVipForm(vipForm);
+    if (errors.length) {
+      window.alert(errors.join('\n'));
+      return;
+    }
+    const timestamp = nowIso();
     const payload: VipSession = {
-      ...form,
-      id: editingId ?? uid(),
-      status,
-      createdAt: editingId ? store.sessions.find((session) => session.id === editingId)?.createdAt ?? now : now,
-      updatedAt: now,
-      items: cleanedItems,
+      ...vipForm,
+      id: vipEditingId || uid(),
+      status: 'completed',
+      createdAt: vipEditingId ? store.sessions.find((session) => session.id === vipEditingId)?.createdAt || timestamp : timestamp,
+      updatedAt: timestamp,
+      items: vipForm.items.map(calculateLine),
     };
-
-    updateStoreFromLocal((current) => ({
+    updateStore((current) => ({
       ...current,
-      sessions: editingId
-        ? current.sessions.map((session) => (session.id === editingId ? payload : session))
+      sessions: vipEditingId
+        ? current.sessions.map((session) => (session.id === vipEditingId ? payload : session))
         : [payload, ...current.sessions],
     }));
-
-    setEditingId(null);
-    setForm(makeForm(store.items, store.staff));
-    setTab('log');
+    notify(vipEditingId ? 'VIP log diperbarui' : 'VIP log tersimpan', 'Data complimentary masuk ke penyimpanan lokal dan akan ikut sync.');
+    setVipEditingId(null);
+    setVipForm(makeVipForm(store.items, store.staff));
   };
 
-  const editSession = (session: VipSession) => {
-    setEditingId(session.id);
-    setForm({
-      date: session.date,
-      startTime: session.startTime,
-      endTime: session.endTime || addHours(session.startTime, 1),
-      bookingName: session.bookingName,
-      room: session.room,
-      staffName: session.staffName,
-      notes: session.notes ?? '',
-      items: session.items.map(calculateLine),
-    });
-    setTab('input');
-  };
-
-  const deleteSession = (sessionId: string) => {
-    if (!window.confirm('Hapus log sesi ini?')) return;
-    updateStoreFromLocal((current) => ({
+  const patchVipLine = (lineId: string, patch: Partial<VipSessionItem>) => {
+    setVipForm((current) => ({
       ...current,
-      sessions: current.sessions.filter((session) => session.id !== sessionId),
+      items: current.items.map((line) => calculateLine(line.id === lineId ? { ...line, ...patch } : line)),
     }));
-    if (editingId === sessionId) {
-      setEditingId(null);
-      setForm(makeForm(store.items, store.staff));
+  };
+
+  const startChecklistRun = (staffId: string, type: 'opening' | 'closing') => {
+    const staff = store.staff.find((person) => person.staffId === staffId);
+    if (!staff) return;
+    if (type === 'closing') {
+      const opening = store.checklistRuns.find(
+        (run) => run.date === todayISO() && run.staffId === staffId && run.templateType === 'opening',
+      );
+      if (!opening || !isRunSubmitted(opening)) {
+        window.alert('Closing baru bisa dimulai setelah checklist opening disubmit.');
+        return;
+      }
     }
-  };
+    const templateId = type === 'opening' ? staff.openingTemplateId : staff.closingTemplateId;
+    const template = store.checklistTemplates.find((item) => item.templateId === templateId && item.isActive);
+    if (!template) {
+      notify('Template belum siap', `Template ${type} belum di-assign untuk ${staff.staffName}.`, 'warning');
+      window.alert(`Template ${type} belum di-assign untuk ${staff.staffName}.`);
+      return;
+    }
+    const existing = store.checklistRuns.find(
+      (run) => run.date === todayISO() && run.staffId === staffId && run.templateType === type,
+    );
+    if (existing) return;
 
-  const updateLine = (lineId: string, next: Partial<VipSessionItem>) => {
-    setForm((current) => ({
+    const role = store.roles.find((item) => item.roleId === staff.roleId);
+    const timestamp = nowIso();
+    const runId = uid();
+    const templateItems = getTemplateItems(store, template.templateId);
+    updateStore((current) => ({
       ...current,
-      items: current.items.map((line) => calculateLine(line.id === lineId ? { ...line, ...next } : line)),
+      checklistRuns: [
+        {
+          runId,
+          date: todayISO(),
+          staffId: staff.staffId,
+          staffName: staff.staffName,
+          roleId: staff.roleId,
+          roleName: role?.roleName || '',
+          templateId: template.templateId,
+          templateName: template.templateName,
+          templateType: type,
+          status: 'in_progress',
+          startedAt: timestamp,
+          completedAt: '',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        ...current.checklistRuns,
+      ],
+      checklistRunItems: [
+        ...templateItems.map((item) => ({
+          runItemId: uid(),
+          runId,
+          templateItemId: item.templateItemId,
+          itemName: item.itemName,
+          itemDescription: item.itemDescription,
+          status: 'pending' as RunItemStatus,
+          note: '',
+          photoUrl: '',
+          photoThumbnailUrl: '',
+          photoRequired: item.photoRequired,
+          noteRequired: item.noteRequired,
+          completedAt: '',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+        ...current.checklistRunItems,
+      ],
     }));
+    notify(`${type === 'opening' ? 'Opening' : 'Closing'} dimulai`, `${template.templateName} siap dikerjakan.`);
   };
 
-  const addItemLine = () => {
-    const activeItems = store.items.filter((item) => item.active);
-    const unused = activeItems.find((item) => !form.items.some((line) => line.itemId === item.id)) ?? activeItems[0];
-    if (!unused) return;
-    setForm((current) => ({ ...current, items: [...current.items, createLine(unused)] }));
-  };
-
-  const toggleMajooInLog = (sessionId: string, lineId: string) => {
-    updateStoreFromLocal((current) => ({
+  const patchRunItem = (runItemId: string, patch: Partial<ChecklistRunItem>) => {
+    updateStore((current) => ({
       ...current,
-      sessions: current.sessions.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              updatedAt: new Date().toISOString(),
-              items: session.items.map((line) =>
-                line.id === lineId ? { ...line, majooInputDone: !line.majooInputDone } : line,
-              ),
-            }
-          : session,
+      checklistRunItems: current.checklistRunItems.map((item) =>
+        item.runItemId === runItemId ? { ...item, ...patch, updatedAt: nowIso() } : item,
       ),
     }));
   };
 
-  const resetForm = () => {
-    setEditingId(null);
-    setForm(makeForm(store.items, store.staff));
+  const markRunItem = (runItemId: string, status: 'done' | 'issue') => {
+    const item = store.checklistRunItems.find((row) => row.runItemId === runItemId);
+    if (!item) return;
+    if (status === 'done' && item.photoRequired && !item.photoUrl && !item.photoDataUrl) {
+      notify('Foto wajib diupload', 'Item ini belum bisa Done sebelum ada foto.', 'warning');
+      window.alert('Item ini wajib foto sebelum bisa ditandai Done.');
+      return;
+    }
+    if ((status === 'issue' || item.noteRequired) && !item.note.trim()) {
+      notify('Catatan wajib diisi', status === 'issue' ? 'Issue harus punya catatan.' : 'Item ini wajib catatan.', 'warning');
+      window.alert(status === 'issue' ? 'Issue wajib isi catatan.' : 'Item ini wajib catatan.');
+      return;
+    }
+    patchRunItem(runItemId, { status, completedAt: nowIso() });
+    notify(status === 'done' ? 'Item ditandai Done' : 'Issue tercatat', item.itemName);
   };
 
-  const updateSync = (sync: SyncSettings) => {
-    pendingLocalSyncRef.current = false;
-    setStore((current) => ({ ...current, sync: { ...sync, autoSync: true } }));
+  const submitRun = (runId: string) => {
+    const runItems = store.checklistRunItems.filter((item) => item.runId === runId);
+    const errors = validateRunItems(runItems);
+    if (errors.length) {
+      notify('Checklist belum lengkap', 'Lengkapi item wajib sebelum submit.', 'warning');
+      window.alert(errors.join('\n'));
+      return;
+    }
+    const hasIssue = runItems.some((item) => item.status === 'issue');
+    updateStore((current) => ({
+      ...current,
+      checklistRuns: current.checklistRuns.map((run) =>
+        run.runId === runId
+          ? {
+              ...run,
+              status: hasIssue ? 'has_issue' : 'completed',
+              completedAt: nowIso(),
+              updatedAt: nowIso(),
+            }
+          : run,
+      ),
+    }));
+    const run = store.checklistRuns.find((item) => item.runId === runId);
+    notify(
+      `${run?.templateType === 'closing' ? 'Closing' : 'Opening'} tersubmit`,
+      hasIssue ? 'Data tersubmit dengan issue untuk manager.' : 'Data checklist sudah tersubmit.',
+    );
+  };
+
+  const handlePhoto = async (run: ChecklistRun, item: ChecklistRunItem, file: File) => {
+    const dataUrl = await resizeImage(file);
+    const safeName = `${run.date}_${run.staffName}_${run.templateType}_${item.itemName}`.replace(/[^a-z0-9-_]+/gi, '-');
+    const fileName = `${safeName}.jpg`;
+    let photoUrl = item.photoUrl;
+    let thumbnailUrl = dataUrl;
+
+    if (store.sync.sheetEndpoint.trim()) {
+      try {
+        const uploaded = await uploadPhoto(store.sync.sheetEndpoint.trim(), {
+          dataUrl,
+          fileName,
+          runId: run.runId,
+          runItemId: item.runItemId,
+          staffId: run.staffId,
+          staffName: run.staffName,
+          templateType: run.templateType,
+          date: run.date,
+        });
+        photoUrl = uploaded.fileUrl;
+        thumbnailUrl = uploaded.thumbnailUrl || uploaded.fileUrl;
+        setSyncStatus('Foto tersimpan ke Google Drive.');
+        notify('Foto tersimpan', 'Foto bukti masuk ke Google Drive dan tampil di report.');
+      } catch {
+        setSyncStatus('Foto tampil lokal dulu. Apps Script akan menyimpan ke Drive saat data dikirim.');
+        notify('Foto tersimpan lokal', 'Foto akan ikut dikirim ke Drive saat sync berhasil.', 'info');
+      }
+    } else {
+      notify('Foto tersimpan lokal', 'Isi Apps Script URL agar foto tersimpan ke Google Drive.', 'info');
+    }
+
+    const uploadedAt = nowIso();
+    updateStore((current) => ({
+      ...current,
+      checklistRunItems: current.checklistRunItems.map((row) =>
+        row.runItemId === item.runItemId
+          ? {
+              ...row,
+              photoUrl,
+              photoThumbnailUrl: thumbnailUrl,
+              photoDataUrl: photoUrl ? undefined : dataUrl,
+              photoFileName: fileName,
+              updatedAt: uploadedAt,
+            }
+          : row,
+      ),
+      photoUploads: [
+        {
+          photoId: uid(),
+          runId: run.runId,
+          runItemId: item.runItemId,
+          staffId: run.staffId,
+          staffName: run.staffName,
+          fileName,
+          fileUrl: photoUrl || dataUrl,
+          thumbnailUrl,
+          uploadedAt,
+        },
+        ...current.photoUploads.filter((photo) => photo.runItemId !== item.runItemId),
+      ],
+    }));
   };
 
   const pushToSheet = async () => {
@@ -526,13 +1049,10 @@ function App() {
     setSyncStatus('Mengirim data lokal ke Google Sheet...');
     try {
       await writeSheetStore(endpoint, store);
-      remoteReadyRef.current = true;
       pendingLocalSyncRef.current = false;
+      remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
-      setStore((current) => ({
-        ...current,
-        sync: { ...current.sync, lastSyncedAt: new Date().toISOString() },
-      }));
+      setStore((current) => ({ ...current, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
       setSyncStatus('Data lokal sudah dikirim ke Google Sheet.');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : 'Gagal kirim ke Google Sheet.');
@@ -548,15 +1068,10 @@ function App() {
     setSyncStatus('Menarik data dari Google Sheet...');
     try {
       const remote = await readSheetStore(endpoint);
-      remoteReadyRef.current = true;
       pendingLocalSyncRef.current = false;
+      remoteReadyRef.current = true;
       skipAutoSyncRef.current = true;
-      setStore((current) => ({
-        ...remote,
-        sync: { ...current.sync, lastSyncedAt: new Date().toISOString() },
-      }));
-      setEditingId(null);
-      setForm(makeForm(remote.items, remote.staff));
+      setStore((current) => ({ ...remote, sync: { ...current.sync, lastSyncedAt: nowIso() } }));
       setSyncStatus('Data Google Sheet sudah dimuat.');
     } catch (error) {
       setSyncStatus(error instanceof Error ? error.message : 'Gagal tarik dari Google Sheet.');
@@ -568,48 +1083,64 @@ function App() {
       <header className="topbar">
         <div>
           <div className="brand">NOMONO</div>
-          <div className="brandSub">VIP Complimentary Log</div>
+          <div className="brandSub">VIP Log + Staff SOP Checklist</div>
         </div>
-        <StatusPill sessions={store.sessions} />
+        <StatusPill store={store} />
       </header>
 
       <main className="content">
-        {tab === 'input' && (
-          <InputScreen
-            form={form}
-            setForm={setForm}
-            items={store.items}
-            staff={store.staff}
-            totals={totals}
-            errors={validationErrors}
-            editing={Boolean(editingId)}
-            onSave={saveSession}
-            onReset={resetForm}
-            onAddItem={addItemLine}
-            onUpdateLine={updateLine}
+        {tab === 'vip' && (
+          <VipLogScreen
+            form={vipForm}
+            setForm={setVipForm}
+            editing={Boolean(vipEditingId)}
+            store={store}
+            onSave={saveVipSession}
+            onLineChange={patchVipLine}
+            onEdit={(session) => {
+              setVipEditingId(session.id);
+              setVipForm({
+                date: session.date,
+                startTime: session.startTime,
+                endTime: session.endTime,
+                bookingName: session.bookingName,
+                room: session.room,
+                staffName: session.staffName,
+                notes: session.notes || '',
+                items: session.items.map(calculateLine),
+              });
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onDelete={(sessionId) => updateStore((current) => ({ ...current, sessions: current.sessions.filter((session) => session.id !== sessionId) }))}
+            onReset={() => {
+              setVipEditingId(null);
+              setVipForm(makeVipForm(store.items, store.staff));
+            }}
           />
         )}
 
-        {tab === 'log' && (
-          <LogScreen
-            sessions={store.sessions}
-            onEdit={editSession}
-            onDelete={deleteSession}
-            onToggleMajoo={toggleMajooInLog}
+        {tab === 'checklist' && (
+          <ChecklistScreen
+            store={store}
+            selectedStaff={selectedStaff}
+            selectedStaffId={selectedStaffId}
+            setSelectedStaffId={setSelectedStaffId}
+            onStart={startChecklistRun}
+            onPatchItem={patchRunItem}
+            onMarkItem={markRunItem}
+            onSubmitRun={submitRun}
+            onPhoto={handlePhoto}
           />
         )}
 
-        {tab === 'recap' && <RecapScreen sessions={store.sessions} />}
+        {tab === 'report' && <ReportScreen store={store} />}
 
         {tab === 'master' && (
           <MasterScreen
-            items={store.items}
-            staff={store.staff}
-            sync={store.sync}
+            store={store}
             syncStatus={syncStatus}
-            setItems={(items) => updateStoreFromLocal((current) => ({ ...current, items }))}
-            setStaff={(staff) => updateStoreFromLocal((current) => ({ ...current, staff }))}
-            setSync={updateSync}
+            setStore={updateStore}
+            notify={notify}
             onPushToSheet={pushToSheet}
             onPullFromSheet={pullFromSheet}
           />
@@ -617,346 +1148,679 @@ function App() {
       </main>
 
       <nav className="bottomNav">
-        <NavButton icon={<ClipboardList />} label="Input" active={tab === 'input'} onClick={() => setTab('input')} />
-        <NavButton icon={<History />} label="Log" active={tab === 'log'} onClick={() => setTab('log')} />
-        <NavButton icon={<BarChart3 />} label="Rekap" active={tab === 'recap'} onClick={() => setTab('recap')} />
+        <NavButton icon={<ClipboardList />} label="VIP Log" active={tab === 'vip'} onClick={() => setTab('vip')} />
+        <NavButton icon={<ClipboardCheck />} label="Checklist" active={tab === 'checklist'} onClick={() => setTab('checklist')} />
+        <NavButton icon={<BarChart3 />} label="Report" active={tab === 'report'} onClick={() => setTab('report')} />
         <NavButton icon={<Settings2 />} label="Master" active={tab === 'master'} onClick={() => setTab('master')} />
       </nav>
+      <Toast toast={toast} />
     </div>
   );
 }
 
-function InputScreen({
+function VipLogScreen({
   form,
   setForm,
-  items,
-  staff,
-  totals,
-  errors,
   editing,
+  store,
   onSave,
+  onLineChange,
+  onEdit,
+  onDelete,
   onReset,
-  onAddItem,
-  onUpdateLine,
 }: {
-  form: SessionForm;
-  setForm: React.Dispatch<React.SetStateAction<SessionForm>>;
-  items: Item[];
-  staff: Staff[];
-  totals: ReturnType<typeof getSessionTotals>;
-  errors: string[];
+  form: VipForm;
+  setForm: React.Dispatch<React.SetStateAction<VipForm>>;
   editing: boolean;
-  onSave: (status: SessionStatus) => void;
+  store: AppStore;
+  onSave: () => void;
+  onLineChange: (lineId: string, patch: Partial<VipSessionItem>) => void;
+  onEdit: (session: VipSession) => void;
+  onDelete: (sessionId: string) => void;
   onReset: () => void;
-  onAddItem: () => void;
-  onUpdateLine: (lineId: string, next: Partial<VipSessionItem>) => void;
 }) {
-  const activeItems = items.filter((item) => item.active);
-  const activeStaff = staff.filter((person) => person.active);
+  const activeStaff = store.staff.filter((person) => person.isActive);
+  const totals = getVipTotals(form.items);
+  const todaySessions = store.sessions.filter((session) => session.date === todayISO());
 
   return (
     <section className="stack">
-      <div className="screenTitle">
-        <div>
-          <h1>{editing ? 'Edit Sesi VIP' : 'Input Sesi VIP'}</h1>
-          <p>Catat complimentary yang disiapkan dan sisa segel setelah sesi.</p>
-        </div>
-        {editing && (
-          <button className="iconBtn" onClick={onReset} aria-label="Batal edit">
-            <X size={18} />
-          </button>
-        )}
-      </div>
+      <ScreenTitle
+        title={editing ? 'Edit VIP Log' : 'VIP Complimentary Log'}
+        subtitle="Catat item complimentary dan status input Majoo dari satu halaman."
+        action={
+          editing ? (
+            <button className="secondaryBtn" onClick={onReset}>
+              <X size={16} /> Batal
+            </button>
+          ) : null
+        }
+      />
 
-      <div className="panel sessionPanel">
+      <div className="panel formGrid">
         <Field label="Tanggal">
-          <input value={form.date} type="date" onChange={(event) => setFormValue(setForm, 'date', event.target.value)} />
+          <input type="date" value={form.date} onChange={(event) => setFormValue(setForm, 'date', event.target.value)} />
         </Field>
         <Field label="Mulai">
-          <select
-            value={form.startTime}
-            onChange={(event) => setFormValue(setForm, 'startTime', event.target.value)}
-          >
-            {!BOOKING_TIME_OPTIONS.some((option) => option.value === form.startTime) && (
-              <option value={form.startTime}>{form.startTime.replace(':', '.')}</option>
-            )}
-            {BOOKING_TIME_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <input type="time" value={form.startTime} onChange={(event) => setFormValue(setForm, 'startTime', event.target.value)} />
         </Field>
         <Field label="Selesai">
-          <select
-            value={form.endTime}
-            onChange={(event) => setFormValue(setForm, 'endTime', event.target.value)}
-          >
-            {!BOOKING_TIME_OPTIONS.some((option) => option.value === form.endTime) && (
-              <option value={form.endTime}>{form.endTime.replace(':', '.')}</option>
-            )}
-            {BOOKING_TIME_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <input type="time" value={form.endTime} onChange={(event) => setFormValue(setForm, 'endTime', event.target.value)} />
         </Field>
         <Field label="Booking">
-          <input
-            value={form.bookingName}
-            placeholder="Nama tamu"
-            onChange={(event) => setFormValue(setForm, 'bookingName', event.target.value)}
-          />
+          <input value={form.bookingName} placeholder="Nama booking" onChange={(event) => setFormValue(setForm, 'bookingName', event.target.value)} />
+        </Field>
+        <Field label="Ruangan">
+          <input value={form.room} onChange={(event) => setFormValue(setForm, 'room', event.target.value)} />
         </Field>
         <Field label="Staff">
           <select value={form.staffName} onChange={(event) => setFormValue(setForm, 'staffName', event.target.value)}>
+            <option value="">Pilih staff</option>
             {activeStaff.map((person) => (
-              <option key={person.id} value={person.name}>
-                {person.name}
+              <option value={person.staffName} key={person.staffId}>
+                {person.staffName}
               </option>
             ))}
           </select>
         </Field>
         <Field label="Catatan">
-          <textarea
-            value={form.notes}
-            rows={2}
-            placeholder="Opsional"
-            onChange={(event) => setFormValue(setForm, 'notes', event.target.value)}
-          />
+          <textarea value={form.notes || ''} rows={2} onChange={(event) => setFormValue(setForm, 'notes', event.target.value)} />
         </Field>
       </div>
 
-      <div className="summaryStrip">
-        <MiniStat label="Terpakai" value={totals.usedQty.toLocaleString('id-ID')} />
-        <MiniStat label="Balik Stok" value={totals.returnQty.toLocaleString('id-ID')} />
+      <div className="metricGrid">
+        <Metric label="Item Terpakai" value={String(totals.usedQty)} tone="green" />
+        <Metric label="Return Stock" value={String(totals.returnQty)} tone="gold" />
+        <Metric label="Total HPP" value={rupiah(totals.totalCost)} tone="green" />
+        <Metric label="Log Hari Ini" value={String(todaySessions.length)} tone="red" />
       </div>
 
       <div className="sectionHeader">
-        <h2>Items</h2>
-        <button className="smallAction" onClick={onAddItem} disabled={!activeItems.length}>
-          <Plus size={14} /> Item
-        </button>
+        <h2>Item Complimentary</h2>
       </div>
-
       <div className="stack tight">
-        {form.items.map((line, index) => {
-          const selectedItem = items.find((item) => item.id === line.itemId);
-          const invalid = line.sealedLeftQty > line.preparedQty;
-
-          return (
-            <article className={`itemCard ${invalid ? 'dangerCard' : ''}`} key={line.id}>
-              <div className="itemTop">
-                <div className="itemNumber">{index + 1}</div>
-                <select
-                  value={line.itemId}
-                  onChange={(event) => {
-                    const item = items.find((entry) => entry.id === event.target.value);
-                    if (!item) return;
-                    onUpdateLine(line.id, {
-                      itemId: item.id,
-                      itemName: item.name,
-                      hpp: item.hpp,
-                      preparedQty: item.defaultQty,
-                    });
-                  }}
-                >
-                  {activeItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                  {selectedItem && !selectedItem.active && <option value={selectedItem.id}>{selectedItem.name}</option>}
-                </select>
-                <button
-                  className="iconBtn ghost"
-                  onClick={() =>
-                    setForm((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== line.id) }))
-                  }
-                  aria-label="Hapus item"
-                >
-                  <Trash2 size={16} />
-                </button>
+        {form.items.map((line, index) => (
+          <article className="itemCard" key={line.id}>
+            <div className="itemTop">
+              <div className="itemNumber">{index + 1}</div>
+              <div>
+                <strong>{line.itemName}</strong>
+                <span>{rupiah(line.hpp)} / item</span>
               </div>
-
-              <div className="qtyGrid">
-                <Field label="Disiapkan">
-                  <input
-                    inputMode="numeric"
-                    value={line.preparedQty}
-                    onChange={(event) => onUpdateLine(line.id, { preparedQty: Number(event.target.value) })}
-                  />
-                </Field>
-                <Field label="Sisa Segel">
-                  <input
-                    inputMode="numeric"
-                    value={line.sealedLeftQty}
-                    onChange={(event) => onUpdateLine(line.id, { sealedLeftQty: Number(event.target.value) })}
-                  />
-                </Field>
+            </div>
+            <div className="qtyGrid">
+              <Field label="Disiapkan">
+                <input
+                  inputMode="numeric"
+                  value={line.preparedQty}
+                  onChange={(event) => onLineChange(line.id, { preparedQty: Number(event.target.value) })}
+                />
+              </Field>
+              <Field label="Sisa Segel">
+                <input
+                  inputMode="numeric"
+                  value={line.sealedLeftQty}
+                  onChange={(event) => onLineChange(line.id, { sealedLeftQty: Number(event.target.value) })}
+                />
+              </Field>
+            </div>
+            <div className="calcRow">
+              <div>
+                <span>Terpakai</span>
+                <strong>{line.usedQty}</strong>
               </div>
-
-              <div className="calcRow">
-                <div>
-                  <span>Terpakai</span>
-                  <strong>{line.usedQty}</strong>
-                </div>
-                <label className="checkLine">
-                  <input
-                    type="checkbox"
-                    checked={line.majooInputDone}
-                    onChange={(event) => onUpdateLine(line.id, { majooInputDone: event.target.checked })}
-                  />
-                  Majoo
-                </label>
+              <div>
+                <span>HPP</span>
+                <strong>{rupiah(line.totalCost)}</strong>
               </div>
-
-              {invalid && <p className="errorText">Sisa segel tidak boleh lebih besar dari qty disiapkan.</p>}
-            </article>
-          );
-        })}
+              <label className="checkLine">
+                <input
+                  type="checkbox"
+                  checked={line.majooInputDone}
+                  onChange={(event) => onLineChange(line.id, { majooInputDone: event.target.checked })}
+                />
+                Majoo OK
+              </label>
+            </div>
+          </article>
+        ))}
       </div>
-
-      {errors.length > 0 && (
-        <div className="errorBox">
-          {errors.map((error) => (
-            <p key={error}>{error}</p>
-          ))}
-        </div>
-      )}
 
       <div className="stickyActions">
-        <button className="primaryBtn" onClick={() => onSave('completed')} disabled={errors.length > 0}>
-          <Check size={16} /> Complete
+        <button className="primaryBtn" onClick={onSave}>
+          <Save size={16} /> {editing ? 'Update VIP Log' : 'Simpan VIP Log'}
         </button>
       </div>
-    </section>
-  );
-}
 
-function LogScreen({
-  sessions,
-  onEdit,
-  onDelete,
-  onToggleMajoo,
-}: {
-  sessions: VipSession[];
-  onEdit: (session: VipSession) => void;
-  onDelete: (sessionId: string) => void;
-  onToggleMajoo: (sessionId: string, lineId: string) => void;
-}) {
-  const [filter, setFilter] = useState<LogFilter>('today');
-  const [startDate, setStartDate] = useState(todayISO());
-  const [endDate, setEndDate] = useState(todayISO());
-  const filtered = useMemo(
-    () => filterSessions(sessions, filter, startDate, endDate),
-    [sessions, filter, startDate, endDate],
-  );
-  const exportRows = filtered.flatMap((session) =>
-    session.items.map((item) => ({
-      date: session.date,
-      startTime: session.startTime,
-      endTime: session.endTime || '',
-      bookingName: session.bookingName,
-      room: session.room,
-      staffName: session.staffName,
-      itemName: item.itemName,
-      preparedQty: item.preparedQty,
-      sealedLeftQty: item.sealedLeftQty,
-      usedQty: item.usedQty,
-      returnToStockQty: item.returnToStockQty,
-      hpp: item.hpp,
-      totalCost: item.totalCost,
-      majooInputDone: item.majooInputDone ? 'Yes' : 'No',
-      notes: session.notes ?? '',
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-    })),
-  );
-
-  return (
-    <section className="stack">
-      <div className="screenTitle">
-        <div>
-          <h1>Log Harian</h1>
-          <p>{filtered.length} sesi sesuai filter.</p>
-        </div>
-        <button className="accentBtn" onClick={() => exportCsv(exportRows)} disabled={!exportRows.length}>
+      <div className="sectionHeader">
+        <h2>Log Terbaru</h2>
+        <button className="accentBtn" onClick={() => exportVipCsv(store.sessions)} disabled={!store.sessions.length}>
           <Download size={15} /> CSV
         </button>
       </div>
-
-      <div className="filterBar">
-        <button className={filter === 'today' ? 'active' : ''} onClick={() => setFilter('today')}>
-          Hari Ini
-        </button>
-        <button className={filter === 'month' ? 'active' : ''} onClick={() => setFilter('month')}>
-          Bulan Ini
-        </button>
-        <button className={filter === 'custom' ? 'active' : ''} onClick={() => setFilter('custom')}>
-          Custom
-        </button>
-        <button className={filter === 'notMajoo' ? 'active warn' : ''} onClick={() => setFilter('notMajoo')}>
-          Belum Majoo
-        </button>
-      </div>
-
-      {filter === 'custom' && (
-        <div className="panel dateRange">
-          <Field label="Dari">
-            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-          </Field>
-          <Field label="Sampai">
-            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-          </Field>
-        </div>
-      )}
-
       <div className="stack tight">
-        {filtered.map((session) => (
-          <SessionCard
-            key={session.id}
-            session={session}
-            onEdit={() => onEdit(session)}
-            onDelete={() => onDelete(session.id)}
-            onToggleMajoo={onToggleMajoo}
-          />
+        {store.sessions.slice(0, 12).map((session) => (
+          <article className="logCard" key={session.id}>
+            <div className="logHead">
+              <div>
+                <span className="eyebrow">{niceDate(session.date)}</span>
+                <h3>{session.bookingName}</h3>
+                <p>
+                  {session.staffName} · {session.room} · {session.startTime}-{session.endTime}
+                </p>
+              </div>
+              <div className="cardActions">
+                <button className="iconBtn" onClick={() => onEdit(session)} aria-label="Edit VIP log">
+                  <FileText size={15} />
+                </button>
+                <button className="iconBtn danger" onClick={() => onDelete(session.id)} aria-label="Hapus VIP log">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+            <div className="logTotals">
+              <span>{getVipTotals(session.items).usedQty} item terpakai</span>
+              <strong>{rupiah(getVipTotals(session.items).totalCost)}</strong>
+            </div>
+          </article>
         ))}
-        {!filtered.length && <EmptyState title="Belum ada log" body="Data yang cocok dengan filter akan muncul di sini." />}
+        {!store.sessions.length && <EmptyState title="Belum ada VIP log" body="Sesi complimentary yang disimpan akan muncul di sini." />}
       </div>
     </section>
   );
 }
 
-function RecapScreen({ sessions }: { sessions: VipSession[] }) {
-  const [selectedMonth, setSelectedMonth] = useState(monthKey(todayISO()));
-  const monthlySessions = useMemo(
-    () => sessions.filter((session) => monthKey(session.date) === selectedMonth),
-    [sessions, selectedMonth],
-  );
-  const recap = useMemo(() => buildRecap(monthlySessions), [monthlySessions]);
+function ChecklistScreen({
+  store,
+  selectedStaff,
+  selectedStaffId,
+  setSelectedStaffId,
+  onStart,
+  onPatchItem,
+  onMarkItem,
+  onSubmitRun,
+  onPhoto,
+}: {
+  store: AppStore;
+  selectedStaff?: Staff;
+  selectedStaffId: string;
+  setSelectedStaffId: (staffId: string) => void;
+  onStart: (staffId: string, type: 'opening' | 'closing') => void;
+  onPatchItem: (runItemId: string, patch: Partial<ChecklistRunItem>) => void;
+  onMarkItem: (runItemId: string, status: 'done' | 'issue') => void;
+  onSubmitRun: (runId: string) => void;
+  onPhoto: (run: ChecklistRun, item: ChecklistRunItem, file: File) => void;
+}) {
+  const [activeRunType, setActiveRunType] = useState<'opening' | 'closing'>('opening');
+  const today = todayISO();
+  const role = store.roles.find((item) => item.roleId === selectedStaff?.roleId);
+  const openingRun = selectedStaff
+    ? store.checklistRuns.find((run) => run.date === today && run.staffId === selectedStaff.staffId && run.templateType === 'opening')
+    : undefined;
+  const closingRun = selectedStaff
+    ? store.checklistRuns.find((run) => run.date === today && run.staffId === selectedStaff.staffId && run.templateType === 'closing')
+    : undefined;
+  const openingSubmitted = openingRun ? isRunSubmitted(openingRun) : false;
+  const activeRun = activeRunType === 'closing' ? closingRun : openingRun;
+  const activeRunSubmitted = activeRun ? isRunSubmitted(activeRun) : false;
+
+  useEffect(() => {
+    if (!selectedStaff) return;
+    if (!openingSubmitted) {
+      setActiveRunType('opening');
+      return;
+    }
+    if (closingRun) setActiveRunType('closing');
+  }, [closingRun?.runId, openingSubmitted, selectedStaff?.staffId]);
 
   return (
     <section className="stack">
-      <div className="screenTitle">
-        <div>
-          <h1>Rekap</h1>
-          <p>Ringkasan biaya complimentary bulanan.</p>
+      <ScreenTitle title="Staff SOP Checklist" subtitle={`${niceDate(today)} · opening dan closing harian.`} />
+
+      <div className="panel staffPicker">
+        <Field label="Staff">
+          <select value={selectedStaffId || selectedStaff?.staffId || ''} onChange={(event) => setSelectedStaffId(event.target.value)}>
+            <option value="">Pilih staff</option>
+            {store.staff
+              .filter((person) => person.isActive)
+              .map((person) => (
+                <option value={person.staffId} key={person.staffId}>
+                  {person.staffName}
+                </option>
+              ))}
+          </select>
+        </Field>
+        <div className="staffBadge">
+          <UserRound size={17} />
+          <div>
+            <strong>{selectedStaff?.staffName || 'Belum pilih staff'}</strong>
+            <span>{role?.roleName || 'Role belum diset'}</span>
+          </div>
         </div>
-        <input
-          className="monthInput"
-          type="month"
-          value={selectedMonth}
-          onChange={(event) => setSelectedMonth(event.target.value)}
+      </div>
+
+      {selectedStaff ? (
+        <>
+          <div className="runGrid">
+            <RunSummaryCard
+              type="opening"
+              run={openingRun}
+              store={store}
+              templateId={selectedStaff.openingTemplateId}
+              active={activeRunType === 'opening'}
+              onSelect={() => setActiveRunType('opening')}
+              onStart={() => {
+                onStart(selectedStaff.staffId, 'opening');
+                setActiveRunType('opening');
+              }}
+            />
+            <RunSummaryCard
+              type="closing"
+              run={closingRun}
+              store={store}
+              templateId={selectedStaff.closingTemplateId}
+              active={activeRunType === 'closing'}
+              disabled={!openingSubmitted}
+              disabledReason="Submit opening dulu"
+              onSelect={() => {
+                if (!openingSubmitted) {
+                  window.alert('Closing baru bisa dipilih setelah checklist opening disubmit.');
+                  return;
+                }
+                setActiveRunType('closing');
+              }}
+              onStart={() => {
+                if (!openingSubmitted) {
+                  window.alert('Closing baru bisa dimulai setelah checklist opening disubmit.');
+                  return;
+                }
+                onStart(selectedStaff.staffId, 'closing');
+                setActiveRunType('closing');
+              }}
+            />
+          </div>
+
+          {activeRun && !activeRunSubmitted ? (
+            <RunDetail
+              key={activeRun.runId}
+              run={activeRun}
+              items={store.checklistRunItems.filter((item) => item.runId === activeRun.runId)}
+              onPatchItem={onPatchItem}
+              onMarkItem={onMarkItem}
+              onSubmitRun={onSubmitRun}
+              onPhoto={onPhoto}
+            />
+          ) : (
+            <EmptyState
+              title={
+                activeRunSubmitted
+                  ? `${activeRunType === 'closing' ? 'Closing' : 'Opening'} sudah tersubmit`
+                  : activeRunType === 'closing'
+                    ? 'Closing belum dimulai'
+                    : 'Opening belum dimulai'
+              }
+              body={
+                activeRunSubmitted
+                  ? activeRunType === 'opening'
+                    ? 'Daftar opening sudah dibersihkan. Staff bisa lanjut mulai closing.'
+                    : 'Daftar closing sudah dibersihkan. Data bisa dicek manager di Report.'
+                  : activeRunType === 'closing'
+                    ? 'Closing akan tersedia setelah opening disubmit.'
+                    : 'Mulai opening untuk melihat item checklist hari ini.'
+              }
+            />
+          )}
+        </>
+      ) : (
+        <EmptyState title="Pilih staff" body="Checklist opening dan closing akan tampil sesuai template yang di-assign ke staff." />
+      )}
+    </section>
+  );
+}
+
+function RunSummaryCard({
+  type,
+  run,
+  store,
+  templateId,
+  active = false,
+  disabled = false,
+  disabledReason,
+  onSelect,
+  onStart,
+}: {
+  type: 'opening' | 'closing';
+  run?: ChecklistRun;
+  store: AppStore;
+  templateId: string;
+  active?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
+  onSelect: () => void;
+  onStart: () => void;
+}) {
+  const template = store.checklistTemplates.find((item) => item.templateId === templateId);
+  const runItems = run ? store.checklistRunItems.filter((item) => item.runId === run.runId) : [];
+  const done = runItems.filter((item) => item.status === 'done' || item.status === 'issue').length;
+  const label = type === 'opening' ? 'Opening' : 'Closing';
+
+  return (
+    <article className={`runCard ${active ? 'active' : ''}`}>
+      <div>
+        <span className="eyebrow">{label}</span>
+        <h3>{template?.templateName || `${label} belum di-assign`}</h3>
+        <p>{disabled && !run ? disabledReason || 'Terkunci' : run ? `${done}/${runItems.length} selesai` : 'Not Started'}</p>
+      </div>
+      <StatusBadge status={run?.status || 'not_started'} />
+      {run ? (
+        <>
+          <div className="progressTrack">
+            <span style={{ width: `${runItems.length ? (done / runItems.length) * 100 : 0}%` }} />
+          </div>
+          <button className={active ? 'primaryBtn' : 'secondaryBtn'} onClick={onSelect}>
+            <Eye size={16} /> Lihat {label}
+          </button>
+        </>
+      ) : (
+        <button className="primaryBtn" onClick={onStart} disabled={!template || disabled}>
+          <Check size={16} /> Mulai {label}
+        </button>
+      )}
+    </article>
+  );
+}
+
+function RunDetail({
+  run,
+  items,
+  onPatchItem,
+  onMarkItem,
+  onSubmitRun,
+  onPhoto,
+}: {
+  run: ChecklistRun;
+  items: ChecklistRunItem[];
+  onPatchItem: (runItemId: string, patch: Partial<ChecklistRunItem>) => void;
+  onMarkItem: (runItemId: string, status: 'done' | 'issue') => void;
+  onSubmitRun: (runId: string) => void;
+  onPhoto: (run: ChecklistRun, item: ChecklistRunItem, file: File) => void;
+}) {
+  const completed = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
+  const canSubmit = items.length > 0 && completed === items.length && run.status === 'in_progress';
+
+  return (
+    <section className="stack">
+      <div className="sectionHeader">
+        <h2>{run.templateName}</h2>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className="stack tight">
+        {items.map((item) => (
+          <article className={`checkItem ${item.status}`} key={item.runItemId}>
+            <div className="checkItemHead">
+              <div>
+                <strong>{item.itemName}</strong>
+                <p>{item.itemDescription}</p>
+              </div>
+              <ItemStatus status={item.status} />
+            </div>
+            <div className="requirementRow">
+              {item.photoRequired && (
+                <span>
+                  <Camera size={13} /> Wajib foto
+                </span>
+              )}
+              {item.noteRequired && (
+                <span>
+                  <FileText size={13} /> Wajib catatan
+                </span>
+              )}
+              {!item.photoRequired && !item.noteRequired && <span>Standar</span>}
+            </div>
+
+            {(item.photoRequired || item.photoThumbnailUrl || item.photoDataUrl) && (
+              <div className="photoBox">
+                {item.photoThumbnailUrl || item.photoDataUrl ? (
+                  <a href={item.photoUrl || item.photoDataUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
+                    <img src={item.photoThumbnailUrl || item.photoDataUrl} alt={`Foto ${item.itemName}`} />
+                  </a>
+                ) : (
+                  <div className="photoPlaceholder">
+                    <Image size={20} />
+                    <span>Belum ada foto</span>
+                  </div>
+                )}
+                <label className="uploadBtn">
+                  <Upload size={15} />
+                  Upload Foto
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void onPhoto(run, item, file);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+
+            <Field label={item.status === 'issue' || item.noteRequired ? 'Catatan' : 'Catatan opsional'}>
+              <textarea
+                value={item.note}
+                rows={2}
+                placeholder={item.status === 'issue' ? 'Jelaskan issue yang ditemukan' : 'Tambahkan catatan bila perlu'}
+                onChange={(event) => onPatchItem(item.runItemId, { note: event.target.value })}
+              />
+            </Field>
+
+            <div className="itemActions">
+              <button className="secondaryBtn" onClick={() => onMarkItem(item.runItemId, 'issue')}>
+                <AlertTriangle size={16} /> Issue
+              </button>
+              <button className="primaryBtn" onClick={() => onMarkItem(item.runItemId, 'done')}>
+                <Check size={16} /> Done
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+      {run.status === 'in_progress' && (
+        <div className="stickyActions">
+          <button className="primaryBtn" onClick={() => onSubmitRun(run.runId)} disabled={!canSubmit}>
+            <ClipboardCheck size={16} /> Submit {run.templateType}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ReportScreen({ store }: { store: AppStore }) {
+  const [reportMode, setReportMode] = useState<'checklist' | 'vip'>('checklist');
+  const [date, setDate] = useState(todayISO());
+  const [selectedMonth, setSelectedMonth] = useState(todayISO().slice(0, 7));
+  const [staffId, setStaffId] = useState('all');
+  const [templateType, setTemplateType] = useState<'all' | TemplateType>('all');
+  const [status, setStatus] = useState<'all' | RunStatus>('all');
+
+  const filteredRuns = useMemo(
+    () =>
+      store.checklistRuns
+        .filter((run) => run.date === date)
+        .filter((run) => (staffId === 'all' ? true : run.staffId === staffId))
+        .filter((run) => (templateType === 'all' ? true : run.templateType === templateType))
+        .filter((run) => (status === 'all' ? true : run.status === status))
+        .sort((a, b) => a.staffName.localeCompare(b.staffName)),
+    [date, staffId, status, store.checklistRuns, templateType],
+  );
+
+  const issues = store.checklistRunItems.filter((item) => {
+    const run = store.checklistRuns.find((row) => row.runId === item.runId);
+    return run?.date === date && item.status === 'issue';
+  });
+
+  const rows = filteredRuns.flatMap((run) =>
+    store.checklistRunItems
+      .filter((item) => item.runId === run.runId)
+      .map((item) => ({
+        date: run.date,
+        staff: run.staffName,
+        role: run.roleName,
+        template: run.templateName,
+        type: run.templateType,
+        item: item.itemName,
+        status: item.status,
+        note: item.note,
+        photoUrl: item.photoUrl,
+        submittedAt: run.completedAt,
+      })),
+  );
+
+  if (reportMode === 'vip') {
+    return (
+      <section className="stack">
+        <ScreenTitle
+          title="Report"
+          subtitle="Pilih report checklist staff atau rekap biaya complimentary."
+          action={
+            <input
+              className="monthInput"
+              type="month"
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+            />
+          }
         />
+        <div className="filterBar">
+          <button onClick={() => setReportMode('checklist')}>
+            Checklist
+          </button>
+          <button className="active" onClick={() => setReportMode('vip')}>
+            VIP Rekap
+          </button>
+        </div>
+        <VipRecapPanel sessions={store.sessions} selectedMonth={selectedMonth} />
+      </section>
+    );
+  }
+
+  return (
+    <section className="stack">
+      <ScreenTitle
+        title="Report"
+        subtitle="Pilih report checklist staff atau rekap biaya complimentary."
+        action={
+          <button className="accentBtn" onClick={() => exportChecklistCsv(rows)} disabled={!rows.length}>
+            <Download size={15} /> CSV
+          </button>
+        }
+      />
+
+      <div className="filterBar">
+        <button className="active" onClick={() => setReportMode('checklist')}>
+          Checklist
+        </button>
+        <button onClick={() => setReportMode('vip')}>
+          VIP Rekap
+        </button>
+      </div>
+
+      <div className="panel filterGrid">
+        <Field label="Tanggal">
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        </Field>
+        <Field label="Staff">
+          <select value={staffId} onChange={(event) => setStaffId(event.target.value)}>
+            <option value="all">Semua</option>
+            {store.staff.map((person) => (
+              <option value={person.staffId} key={person.staffId}>
+                {person.staffName}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Jenis">
+          <select value={templateType} onChange={(event) => setTemplateType(event.target.value as 'all' | TemplateType)}>
+            <option value="all">Semua</option>
+            <option value="opening">Opening</option>
+            <option value="closing">Closing</option>
+            <option value="custom">Custom</option>
+          </select>
+        </Field>
+        <Field label="Status">
+          <select value={status} onChange={(event) => setStatus(event.target.value as 'all' | RunStatus)}>
+            <option value="all">Semua</option>
+            <option value="not_started">Not Started</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="has_issue">Has Issue</option>
+          </select>
+        </Field>
       </div>
 
       <div className="metricGrid">
-        <Metric label="Sesi VIP" value={recap.sessionCount.toLocaleString('id-ID')} accent="green" />
-        <Metric label="Total Biaya" value={rupiah(recap.totalCost)} accent="gold" />
-        <Metric label="Qty Terpakai" value={recap.totalUsed.toLocaleString('id-ID')} accent="green" />
-        <Metric label="Belum Majoo" value={recap.notMajoo.toLocaleString('id-ID')} accent="red" />
+        <Metric label="Run" value={String(filteredRuns.length)} tone="green" />
+        <Metric label="Issue" value={String(issues.length)} tone="red" />
+        <Metric label="Completed" value={String(filteredRuns.filter((run) => run.status === 'completed').length)} tone="green" />
+        <Metric label="In Progress" value={String(filteredRuns.filter((run) => run.status === 'in_progress').length)} tone="gold" />
+      </div>
+
+      <div className="sectionHeader">
+        <h2>Dashboard Harian</h2>
+      </div>
+      <div className="stack tight">
+        {filteredRuns.map((run) => (
+          <RunReportCard key={run.runId} run={run} items={store.checklistRunItems.filter((item) => item.runId === run.runId)} />
+        ))}
+        {!filteredRuns.length && <EmptyState title="Belum ada checklist" body="Run yang sesuai filter akan muncul di sini." />}
+      </div>
+
+      <div className="sectionHeader">
+        <h2>Issue Today</h2>
+      </div>
+      <div className="stack tight">
+        {issues.map((item) => {
+          const run = store.checklistRuns.find((row) => row.runId === item.runId);
+          return (
+            <article className="issueCard" key={item.runItemId}>
+              <div>
+                <strong>{item.itemName}</strong>
+                <span>
+                  {run?.staffName} · {run?.templateName}
+                </span>
+                <p>{item.note || 'Belum ada catatan.'}</p>
+              </div>
+              {(item.photoThumbnailUrl || item.photoUrl) && (
+                <a className="thumbLink" href={item.photoUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
+                  <img src={item.photoThumbnailUrl || item.photoUrl} alt={`Foto ${item.itemName}`} />
+                </a>
+              )}
+            </article>
+          );
+        })}
+        {!issues.length && <EmptyState title="Tidak ada issue" body="Issue checklist pada tanggal terpilih akan muncul di sini." />}
+      </div>
+    </section>
+  );
+}
+
+function VipRecapPanel({ sessions, selectedMonth }: { sessions: VipSession[]; selectedMonth: string }) {
+  const monthlySessions = useMemo(
+    () => sessions.filter((session) => session.date.slice(0, 7) === selectedMonth),
+    [sessions, selectedMonth],
+  );
+  const recap = useMemo(() => buildVipRecap(monthlySessions), [monthlySessions]);
+
+  return (
+    <>
+      <div className="metricGrid">
+        <Metric label="Sesi VIP" value={recap.sessionCount.toLocaleString('id-ID')} tone="green" />
+        <Metric label="Total Biaya" value={rupiah(recap.totalCost)} tone="gold" />
+        <Metric label="Qty Terpakai" value={recap.totalUsed.toLocaleString('id-ID')} tone="green" />
+        <Metric label="Belum Majoo" value={recap.notMajoo.toLocaleString('id-ID')} tone="red" />
       </div>
 
       <div className="panel highlightPanel">
@@ -987,257 +1851,610 @@ function RecapScreen({ sessions }: { sessions: VipSession[] }) {
             </div>
           </div>
         ))}
-        {!recap.itemRows.length && <EmptyState title="Belum ada rekap" body="Simpan sesi VIP untuk melihat ringkasan." />}
+        {!recap.itemRows.length && <EmptyState title="Belum ada rekap" body="Simpan sesi VIP untuk melihat ringkasan bulanan." />}
       </div>
-    </section>
+    </>
+  );
+}
+
+function RunReportCard({ run, items }: { run: ChecklistRun; items: ChecklistRunItem[] }) {
+  const done = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
+  const issue = items.filter((item) => item.status === 'issue').length;
+  return (
+    <article className="reportCard">
+      <div className="logHead">
+        <div>
+          <span className="eyebrow">{run.templateType}</span>
+          <h3>{run.staffName}</h3>
+          <p>
+            {run.roleName} · {run.templateName}
+          </p>
+        </div>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className="summaryStrip">
+        <div>
+          <span>Progress</span>
+          <strong>
+            {done}/{items.length}
+          </strong>
+        </div>
+        <div>
+          <span>Issue</span>
+          <strong className={issue ? 'dangerText' : ''}>{issue}</strong>
+        </div>
+        <div>
+          <span>Jam selesai</span>
+          <strong>{run.completedAt ? new Date(run.completedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>
+        </div>
+        <div>
+          <span>Foto bukti</span>
+          <strong>{items.filter((item) => item.photoUrl || item.photoThumbnailUrl).length}</strong>
+        </div>
+      </div>
+      <details className="detailsBlock">
+        <summary>
+          <Eye size={15} /> Detail item
+        </summary>
+        <div className="lineList">
+          {items.map((item) => (
+            <div className="lineRow" key={item.runItemId}>
+              <div>
+                <strong>{item.itemName}</strong>
+                <span>{item.note || item.itemDescription}</span>
+                {(item.photoThumbnailUrl || item.photoUrl || item.photoDataUrl) && (
+                  <a className="reportPhotoProof" href={item.photoUrl || item.photoDataUrl || item.photoThumbnailUrl} target="_blank" rel="noreferrer">
+                    <img src={item.photoThumbnailUrl || item.photoDataUrl || item.photoUrl} alt={`Foto bukti ${item.itemName}`} />
+                    <em>Lihat foto bukti</em>
+                  </a>
+                )}
+              </div>
+              <ItemStatus status={item.status} />
+            </div>
+          ))}
+        </div>
+      </details>
+    </article>
   );
 }
 
 function MasterScreen({
-  items,
-  staff,
-  sync,
+  store,
   syncStatus,
-  setItems,
-  setStaff,
-  setSync,
+  setStore,
+  notify,
   onPushToSheet,
   onPullFromSheet,
 }: {
-  items: Item[];
-  staff: Staff[];
-  sync: SyncSettings;
+  store: AppStore;
   syncStatus: string;
-  setItems: (items: Item[]) => void;
-  setStaff: (staff: Staff[]) => void;
-  setSync: (sync: SyncSettings) => void;
+  setStore: (updater: React.SetStateAction<AppStore>) => void;
+  notify: (title: string, body?: string, tone?: ToastMessage['tone']) => void;
   onPushToSheet: () => void;
   onPullFromSheet: () => void;
 }) {
-  const [itemDraft, setItemDraft] = useState({ name: '', category: 'Minuman', hpp: 0, defaultQty: 1 });
-  const [staffDraft, setStaffDraft] = useState('');
+  const [section, setSection] = useState<'staff' | 'roles' | 'templates' | 'vip' | 'sync'>('staff');
+  const [draft, setDraft] = useState<AppStore>(() => store);
+  const [masterDirty, setMasterDirty] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(store.checklistTemplates[0]?.templateId || '');
+  const selectedTemplate = draft.checklistTemplates.find((template) => template.templateId === selectedTemplateId);
 
-  const addItem = () => {
-    if (!itemDraft.name.trim()) return;
-    setItems([
-      ...items,
-      {
-        id: uid(),
-        name: itemDraft.name.trim(),
-        category: itemDraft.category.trim() || 'Minuman',
-        hpp: Math.max(0, Number(itemDraft.hpp) || 0),
-        defaultQty: Math.max(0, Math.trunc(Number(itemDraft.defaultQty) || 0)),
-        active: true,
-      },
-    ]);
-    setItemDraft({ name: '', category: 'Minuman', hpp: 0, defaultQty: 1 });
+  useEffect(() => {
+    if (masterDirty) return;
+    setDraft(store);
+    if (!store.checklistTemplates.some((template) => template.templateId === selectedTemplateId)) {
+      setSelectedTemplateId(store.checklistTemplates[0]?.templateId || '');
+    }
+  }, [masterDirty, selectedTemplateId, store]);
+
+  useEffect(() => {
+    if (draft.checklistTemplates.some((template) => template.templateId === selectedTemplateId)) return;
+    setSelectedTemplateId(draft.checklistTemplates[0]?.templateId || '');
+  }, [draft.checklistTemplates, selectedTemplateId]);
+
+  const updateDraft = (updater: React.SetStateAction<AppStore>) => {
+    setMasterDirty(true);
+    setDraft(updater);
+  };
+
+  const saveMaster = () => {
+    setStore(draft);
+    setMasterDirty(false);
+    notify('Master data tersimpan', 'Perubahan master data sudah aktif.');
+  };
+
+  const cancelMaster = () => {
+    setDraft(store);
+    setSelectedTemplateId(store.checklistTemplates[0]?.templateId || '');
+    setMasterDirty(false);
+    notify('Perubahan dibatalkan', 'Master data kembali ke versi terakhir.', 'info');
+  };
+
+  const addRole = () => {
+    const timestamp = nowIso();
+    updateDraft((current) => ({
+      ...current,
+      roles: [
+        ...current.roles,
+        {
+          roleId: uid(),
+          roleName: 'Role Baru',
+          description: '',
+          isActive: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    }));
   };
 
   const addStaff = () => {
-    if (!staffDraft.trim()) return;
-    setStaff([...staff, { id: uid(), name: staffDraft.trim(), active: true }]);
-    setStaffDraft('');
+    const timestamp = nowIso();
+    const roleId = draft.roles[0]?.roleId || '';
+    updateDraft((current) => ({
+      ...current,
+      staff: [
+        ...current.staff,
+        {
+          staffId: uid(),
+          staffName: 'Staff Baru',
+          roleId,
+          openingTemplateId: current.checklistTemplates.find((template) => template.roleId === roleId && template.templateType === 'opening')?.templateId || '',
+          closingTemplateId: current.checklistTemplates.find((template) => template.roleId === roleId && template.templateType === 'closing')?.templateId || '',
+          isActive: true,
+          permissionLevel: 'Staff',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    }));
+  };
+
+  const addTemplate = () => {
+    const timestamp = nowIso();
+    const templateId = uid();
+    setSelectedTemplateId(templateId);
+    updateDraft((current) => ({
+      ...current,
+      checklistTemplates: [
+        ...current.checklistTemplates,
+        {
+          templateId,
+          templateName: 'Template Baru',
+          templateType: 'opening',
+          roleId: current.roles[0]?.roleId || '',
+          description: '',
+          isActive: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    }));
+  };
+
+  const addTemplateItem = () => {
+    if (!selectedTemplate) return;
+    const timestamp = nowIso();
+    const existing = getTemplateItems(draft, selectedTemplate.templateId);
+    updateDraft((current) => ({
+      ...current,
+      checklistTemplateItems: [
+        ...current.checklistTemplateItems,
+        {
+          templateItemId: uid(),
+          templateId: selectedTemplate.templateId,
+          itemName: 'Item checklist baru',
+          itemDescription: '',
+          sortOrder: existing.length + 1,
+          photoRequired: false,
+          noteRequired: false,
+          isActive: true,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    }));
   };
 
   return (
     <section className="stack">
-      <div className="screenTitle">
-        <div>
-          <h1>Master Data</h1>
-          <p>Edit item complimentary, HPP, default qty, dan staff.</p>
-        </div>
-      </div>
-
-      <div className="sectionHeader">
-        <h2>Google Sheet Sync</h2>
-      </div>
-      <div className="panel syncPanel">
-        <Field label="Apps Script URL">
-          <input
-            value={sync.sheetEndpoint}
-            placeholder="https://script.google.com/macros/s/..."
-            onChange={(event) => setSync({ ...sync, sheetEndpoint: event.target.value.trim() })}
-          />
-        </Field>
-        <div className="syncControls">
-          <div className="syncAlwaysOn">Auto-sync aktif</div>
-          <div className="syncButtons">
-            <button className="secondaryBtn" onClick={onPullFromSheet}>
-              <Download size={16} /> Tarik
+      <ScreenTitle
+        title="Master Data"
+        subtitle="Kelola staff, role, template checklist, VIP item, dan Google Sheets sync."
+        action={
+          <div className="cardActions">
+            <button className="secondaryBtn" onClick={cancelMaster} disabled={!masterDirty}>
+              <X size={16} /> Batal
             </button>
-            <button className="primaryBtn" onClick={onPushToSheet}>
-              <Save size={16} /> Kirim
+            <button className="primaryBtn" onClick={saveMaster} disabled={!masterDirty}>
+              <Save size={16} /> Simpan
             </button>
           </div>
-        </div>
-        <p className="syncStatus">{syncStatus}</p>
-        {sync.lastSyncedAt && (
-          <p className="syncStatus muted">
-            Sync terakhir: {new Date(sync.lastSyncedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
-          </p>
-        )}
-      </div>
+        }
+      />
 
-      <div className="sectionHeader">
-        <h2>Items</h2>
-      </div>
-      <div className="panel masterAdd">
-        <Field label="Nama Item">
-          <input
-            value={itemDraft.name}
-            placeholder="Contoh: Teh Botol"
-            onChange={(event) => setItemDraft((current) => ({ ...current, name: event.target.value }))}
-          />
-        </Field>
-        <Field label="Kategori">
-          <input
-            value={itemDraft.category}
-            onChange={(event) => setItemDraft((current) => ({ ...current, category: event.target.value }))}
-          />
-        </Field>
-        <Field label="HPP">
-          <input
-            inputMode="numeric"
-            value={itemDraft.hpp}
-            onChange={(event) => setItemDraft((current) => ({ ...current, hpp: Number(event.target.value) }))}
-          />
-        </Field>
-        <Field label="Default Qty">
-          <input
-            inputMode="numeric"
-            value={itemDraft.defaultQty}
-            onChange={(event) => setItemDraft((current) => ({ ...current, defaultQty: Number(event.target.value) }))}
-          />
-        </Field>
-        <button className="primaryBtn full" onClick={addItem}>
-          <Plus size={16} /> Tambah Item
-        </button>
-      </div>
-
-      <div className="stack tight">
-        {items.map((item) => (
-          <article className="masterRow" key={item.id}>
-            <div className="rowIcon">
-              <Package size={17} />
-            </div>
-            <div className="masterFields">
-              <input
-                value={item.name}
-                onChange={(event) => patchItem(items, setItems, item.id, { name: event.target.value })}
-              />
-              <div className="triple">
-                <input
-                  value={item.category}
-                  onChange={(event) => patchItem(items, setItems, item.id, { category: event.target.value })}
-                />
-                <input
-                  inputMode="numeric"
-                  value={item.hpp}
-                  onChange={(event) => patchItem(items, setItems, item.id, { hpp: Number(event.target.value) })}
-                />
-                <input
-                  inputMode="numeric"
-                  value={item.defaultQty}
-                  onChange={(event) => patchItem(items, setItems, item.id, { defaultQty: Number(event.target.value) })}
-                />
-              </div>
-            </div>
-            <Toggle checked={item.active} onChange={() => patchItem(items, setItems, item.id, { active: !item.active })} />
-          </article>
+      <div className="filterBar">
+        {[
+          ['staff', 'Staff'],
+          ['roles', 'Roles'],
+          ['templates', 'Templates'],
+          ['vip', 'VIP Items'],
+          ['sync', 'Sync'],
+        ].map(([key, label]) => (
+          <button className={section === key ? 'active' : ''} onClick={() => setSection(key as typeof section)} key={key}>
+            {label}
+          </button>
         ))}
       </div>
 
-      <div className="sectionHeader">
-        <h2>Staff</h2>
-      </div>
-      <div className="panel staffAdd">
-        <Field label="Nama Staff">
-          <input value={staffDraft} placeholder="Nama staff" onChange={(event) => setStaffDraft(event.target.value)} />
-        </Field>
-        <button className="primaryBtn full" onClick={addStaff}>
-          <Plus size={16} /> Tambah Staff
-        </button>
-      </div>
-
-      <div className="stack tight">
-        {staff.map((person) => (
-          <article className="masterRow compact" key={person.id}>
-            <div className="rowIcon">
-              <UserRound size={17} />
-            </div>
+      {section === 'sync' && (
+        <div className="panel syncPanel">
+          <Field label="Apps Script URL">
             <input
-              value={person.name}
-              onChange={(event) => patchStaff(staff, setStaff, person.id, { name: event.target.value })}
+              value={draft.sync.sheetEndpoint}
+              placeholder="https://script.google.com/macros/s/..."
+              onChange={(event) =>
+                updateDraft((current) => ({
+                  ...current,
+                  sync: { ...current.sync, sheetEndpoint: event.target.value.trim(), autoSync: true },
+                }))
+              }
             />
-            <Toggle checked={person.active} onChange={() => patchStaff(staff, setStaff, person.id, { active: !person.active })} />
-          </article>
-        ))}
-      </div>
+          </Field>
+          <div className="syncControls">
+            <div className="syncAlwaysOn">Auto-sync aktif</div>
+            <div className="syncButtons">
+              <button className="secondaryBtn" onClick={onPullFromSheet} disabled={masterDirty}>
+                <Download size={16} /> Tarik
+              </button>
+              <button className="primaryBtn" onClick={onPushToSheet} disabled={masterDirty}>
+                <Save size={16} /> Kirim
+              </button>
+            </div>
+          </div>
+          <p className="syncStatus">{syncStatus}</p>
+          {masterDirty && <p className="syncStatus muted">Simpan atau batal dulu sebelum tarik/kirim Google Sheet.</p>}
+          {draft.sync.lastSyncedAt && (
+            <p className="syncStatus muted">
+              Sync terakhir: {new Date(draft.sync.lastSyncedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+            </p>
+          )}
+        </div>
+      )}
+
+      {section === 'roles' && (
+        <>
+          <div className="sectionHeader">
+            <h2>Roles</h2>
+            <button className="accentBtn" onClick={addRole}>
+              <Plus size={15} /> Role
+            </button>
+          </div>
+          <div className="stack tight">
+            {draft.roles.map((role) => (
+              <article className="masterRow" key={role.roleId}>
+                <div className="rowIcon">
+                  <UsersRound size={17} />
+                </div>
+                <div className="masterFields">
+                  <input value={role.roleName} onChange={(event) => patchRole(updateDraft, role.roleId, { roleName: event.target.value })} />
+                  <input
+                    value={role.description}
+                    placeholder="Deskripsi"
+                    onChange={(event) => patchRole(updateDraft, role.roleId, { description: event.target.value })}
+                  />
+                </div>
+                <div className="cardActions">
+                  <Toggle checked={role.isActive} onChange={() => patchRole(updateDraft, role.roleId, { isActive: !role.isActive })} />
+                  <button className="iconBtn danger" onClick={() => deleteRole(updateDraft, role.roleId, role.roleName)} aria-label="Hapus role">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+
+      {section === 'staff' && (
+        <>
+          <div className="sectionHeader">
+            <h2>Staff Assignment</h2>
+            <button className="accentBtn" onClick={addStaff}>
+              <Plus size={15} /> Staff
+            </button>
+          </div>
+          <div className="stack tight">
+            {draft.staff.map((person) => (
+              <article className="staffMasterCard" key={person.staffId}>
+                <div className="masterTitle">
+                  <UserRound size={17} />
+                  <input value={person.staffName} onChange={(event) => patchStaff(updateDraft, person.staffId, { staffName: event.target.value })} />
+                  <div className="cardActions">
+                    <Toggle checked={person.isActive} onChange={() => patchStaff(updateDraft, person.staffId, { isActive: !person.isActive })} />
+                    <button
+                      className="iconBtn danger"
+                      onClick={() => deleteStaff(updateDraft, person.staffId, person.staffName)}
+                      aria-label="Hapus staff"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+                <div className="assignmentGrid">
+                  <Field label="Role">
+                    <select value={person.roleId} onChange={(event) => patchStaff(updateDraft, person.staffId, { roleId: event.target.value })}>
+                      {draft.roles.map((role) => (
+                        <option value={role.roleId} key={role.roleId}>
+                          {role.roleName}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Permission">
+                    <select
+                      value={person.permissionLevel}
+                      onChange={(event) => patchStaff(updateDraft, person.staffId, { permissionLevel: event.target.value as PermissionLevel })}
+                    >
+                      <option value="Staff">Staff</option>
+                      <option value="Supervisor">Supervisor</option>
+                      <option value="Manager">Manager</option>
+                    </select>
+                  </Field>
+                  <Field label="Opening Template">
+                    <select
+                      value={person.openingTemplateId}
+                      onChange={(event) => patchStaff(updateDraft, person.staffId, { openingTemplateId: event.target.value })}
+                    >
+                      <option value="">Belum assign</option>
+                      {draft.checklistTemplates
+                        .filter((template) => template.templateType === 'opening' && template.isActive)
+                        .map((template) => (
+                          <option value={template.templateId} key={template.templateId}>
+                            {template.templateName}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  <Field label="Closing Template">
+                    <select
+                      value={person.closingTemplateId}
+                      onChange={(event) => patchStaff(updateDraft, person.staffId, { closingTemplateId: event.target.value })}
+                    >
+                      <option value="">Belum assign</option>
+                      {draft.checklistTemplates
+                        .filter((template) => template.templateType === 'closing' && template.isActive)
+                        .map((template) => (
+                          <option value={template.templateId} key={template.templateId}>
+                            {template.templateName}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+
+      {section === 'templates' && (
+        <>
+          <div className="sectionHeader">
+            <h2>Checklist Templates</h2>
+            <button className="accentBtn" onClick={addTemplate}>
+              <Plus size={15} /> Template
+            </button>
+          </div>
+          <div className="templateLayout">
+            <div className="templateList">
+              {draft.checklistTemplates.map((template) => (
+                <button
+                  className={template.templateId === selectedTemplateId ? 'templatePick active' : 'templatePick'}
+                  onClick={() => setSelectedTemplateId(template.templateId)}
+                  key={template.templateId}
+                >
+                  <strong>{template.templateName}</strong>
+                  <span>{template.templateType}</span>
+                </button>
+              ))}
+            </div>
+            {selectedTemplate ? (
+              <div className="stack tight">
+                <div className="panel formGrid">
+                  <Field label="Nama Template">
+                    <input
+                      value={selectedTemplate.templateName}
+                      onChange={(event) => patchTemplate(updateDraft, selectedTemplate.templateId, { templateName: event.target.value })}
+                    />
+                  </Field>
+                  <Field label="Jenis">
+                    <select
+                      value={selectedTemplate.templateType}
+                      onChange={(event) => patchTemplate(updateDraft, selectedTemplate.templateId, { templateType: event.target.value as TemplateType })}
+                    >
+                      <option value="opening">Opening</option>
+                      <option value="closing">Closing</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </Field>
+                  <Field label="Untuk Role">
+                    <select
+                      value={selectedTemplate.roleId}
+                      onChange={(event) => patchTemplate(updateDraft, selectedTemplate.templateId, { roleId: event.target.value })}
+                    >
+                      {draft.roles.map((role) => (
+                        <option value={role.roleId} key={role.roleId}>
+                          {role.roleName}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Deskripsi">
+                    <textarea
+                      value={selectedTemplate.description}
+                      rows={2}
+                      onChange={(event) => patchTemplate(updateDraft, selectedTemplate.templateId, { description: event.target.value })}
+                    />
+                  </Field>
+                  <label className="checkLine masterCheck">
+                    <input
+                      type="checkbox"
+                      checked={selectedTemplate.isActive}
+                      onChange={(event) => patchTemplate(updateDraft, selectedTemplate.templateId, { isActive: event.target.checked })}
+                    />
+                    Template aktif
+                  </label>
+                  <button
+                    className="secondaryBtn"
+                    onClick={() => {
+                      const duplicatedId = duplicateTemplate(updateDraft, draft, selectedTemplate.templateId);
+                      if (duplicatedId) setSelectedTemplateId(duplicatedId);
+                    }}
+                  >
+                    <RotateCcw size={16} /> Duplikat Template
+                  </button>
+                  <button
+                    className="secondaryBtn dangerSoft"
+                    onClick={() => {
+                      const nextTemplate = draft.checklistTemplates.find((template) => template.templateId !== selectedTemplate.templateId);
+                      deleteTemplate(updateDraft, selectedTemplate.templateId, selectedTemplate.templateName);
+                      setSelectedTemplateId(nextTemplate?.templateId || '');
+                    }}
+                  >
+                    <Trash2 size={16} /> Hapus Template
+                  </button>
+                </div>
+                <div className="sectionHeader">
+                  <h2>Template Items</h2>
+                  <button className="accentBtn" onClick={addTemplateItem}>
+                    <Plus size={15} /> Item
+                  </button>
+                </div>
+                {getTemplateItems(draft, selectedTemplate.templateId).map((item, index) => (
+                  <article className="templateItemRow" key={item.templateItemId}>
+                    <div className="itemNumber">{index + 1}</div>
+                    <div className="masterFields">
+                      <input
+                        value={item.itemName}
+                        onChange={(event) => patchTemplateItem(updateDraft, item.templateItemId, { itemName: event.target.value })}
+                      />
+                      <input
+                        value={item.itemDescription}
+                        placeholder="Instruksi singkat"
+                        onChange={(event) => patchTemplateItem(updateDraft, item.templateItemId, { itemDescription: event.target.value })}
+                      />
+                      <div className="templateItemControls">
+                        <label className="checkLine">
+                          <input
+                            type="checkbox"
+                            checked={item.photoRequired}
+                            onChange={(event) => patchTemplateItem(updateDraft, item.templateItemId, { photoRequired: event.target.checked })}
+                          />
+                          Foto
+                        </label>
+                        <label className="checkLine">
+                          <input
+                            type="checkbox"
+                            checked={item.noteRequired}
+                            onChange={(event) => patchTemplateItem(updateDraft, item.templateItemId, { noteRequired: event.target.checked })}
+                          />
+                          Catatan
+                        </label>
+                        <button
+                          className="iconBtn"
+                          onClick={() => moveTemplateItem(updateDraft, selectedTemplate.templateId, item.templateItemId, -1)}
+                          aria-label="Naik"
+                        >
+                          <ChevronDown className="flip" size={15} />
+                        </button>
+                        <button
+                          className="iconBtn"
+                          onClick={() => moveTemplateItem(updateDraft, selectedTemplate.templateId, item.templateItemId, 1)}
+                          aria-label="Turun"
+                        >
+                          <ChevronDown size={15} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="cardActions">
+                      <Toggle checked={item.isActive} onChange={() => patchTemplateItem(updateDraft, item.templateItemId, { isActive: !item.isActive })} />
+                      <button
+                        className="iconBtn danger"
+                        onClick={() => deleteTemplateItem(updateDraft, item.templateItemId, item.itemName)}
+                        aria-label="Hapus item template"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Pilih template" body="Detail template dan item akan tampil di sini." />
+            )}
+          </div>
+        </>
+      )}
+
+      {section === 'vip' && (
+        <>
+          <div className="sectionHeader">
+            <h2>VIP Complimentary Items</h2>
+            <button
+              className="accentBtn"
+              onClick={() =>
+                updateDraft((current) => ({
+                  ...current,
+                  items: [...current.items, { id: uid(), name: 'Item Baru', category: 'Minuman', hpp: 0, defaultQty: 1, active: true }],
+                }))
+              }
+            >
+              <Plus size={15} /> Item
+            </button>
+          </div>
+          <div className="stack tight">
+            {draft.items.map((item) => (
+              <article className="masterRow" key={item.id}>
+                <div className="rowIcon">
+                  <Package size={17} />
+                </div>
+                <div className="masterFields">
+                  <input value={item.name} onChange={(event) => patchVipItem(updateDraft, item.id, { name: event.target.value })} />
+                  <div className="triple">
+                    <input value={item.category} onChange={(event) => patchVipItem(updateDraft, item.id, { category: event.target.value })} />
+                    <input inputMode="numeric" value={item.hpp} onChange={(event) => patchVipItem(updateDraft, item.id, { hpp: Number(event.target.value) })} />
+                    <input
+                      inputMode="numeric"
+                      value={item.defaultQty}
+                      onChange={(event) => patchVipItem(updateDraft, item.id, { defaultQty: Number(event.target.value) })}
+                    />
+                  </div>
+                </div>
+                <div className="cardActions">
+                  <Toggle checked={item.active} onChange={() => patchVipItem(updateDraft, item.id, { active: !item.active })} />
+                  <button className="iconBtn danger" onClick={() => deleteVipItem(updateDraft, item.id, item.name)} aria-label="Hapus item VIP">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   );
 }
 
-function SessionCard({
-  session,
-  onEdit,
-  onDelete,
-  onToggleMajoo,
-}: {
-  session: VipSession;
-  onEdit: () => void;
-  onDelete: () => void;
-  onToggleMajoo: (sessionId: string, lineId: string) => void;
-}) {
-  const totals = getSessionTotals(session.items);
-  const notMajoo = session.items.filter((item) => !item.majooInputDone && item.usedQty > 0).length;
-
+function ScreenTitle({ title, subtitle, action }: { title: string; subtitle: string; action?: React.ReactNode }) {
   return (
-    <article className="logCard">
-      <div className="logHead">
-        <div>
-          <div className="logDate">
-            <CalendarDays size={14} />
-            {niceDate(session.date)} · {session.startTime}-{session.endTime || '--:--'}
-          </div>
-          <h3>{session.bookingName}</h3>
-          <p>
-            {session.staffName} · {session.room}
-          </p>
-        </div>
-        <div className="cardActions">
-          <button className="iconBtn" onClick={onEdit} aria-label="Edit sesi">
-            <Edit3 size={15} />
-          </button>
-          <button className="iconBtn danger" onClick={onDelete} aria-label="Hapus sesi">
-            <Trash2 size={15} />
-          </button>
-        </div>
+    <div className="screenTitle">
+      <div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
       </div>
-
-      <div className="logTotals">
-        <span>{totals.usedQty} item terpakai</span>
-        <strong>{rupiah(totals.totalCost)}</strong>
-        {notMajoo > 0 && <em>{notMajoo} belum Majoo</em>}
-      </div>
-
-      <div className="lineList">
-        {session.items.map((line) => (
-          <button className="lineRow" key={line.id} onClick={() => onToggleMajoo(session.id, line.id)}>
-            <div>
-              <strong>{line.itemName}</strong>
-              <span>
-                Siap {line.preparedQty} · Sisa {line.sealedLeftQty} · Pakai {line.usedQty}
-              </span>
-            </div>
-            <div className={line.majooInputDone ? 'majooBadge done' : 'majooBadge'}>
-              {line.majooInputDone ? 'Majoo OK' : 'Belum'}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {session.notes && <p className="notes">{session.notes}</p>}
-    </article>
+      {action}
+    </div>
   );
 }
 
@@ -1250,22 +2467,33 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function MiniStat({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function Metric({ label, value, tone }: { label: string; value: string; tone: 'green' | 'gold' | 'red' }) {
   return (
-    <div>
-      <span>{label}</span>
-      <strong className={strong ? 'gold' : ''}>{value}</strong>
-    </div>
-  );
-}
-
-function Metric({ label, value, accent }: { label: string; value: string; accent: 'green' | 'gold' | 'red' }) {
-  return (
-    <div className={`metric ${accent}`}>
+    <div className={`metric ${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
+}
+
+function StatusBadge({ status }: { status: RunStatus }) {
+  const labels: Record<RunStatus, string> = {
+    not_started: 'Not Started',
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    has_issue: 'Has Issue',
+  };
+  return <div className={`statusBadge ${status}`}>{labels[status]}</div>;
+}
+
+function ItemStatus({ status }: { status: RunItemStatus }) {
+  const labels: Record<RunItemStatus, string> = {
+    pending: 'Pending',
+    done: 'Done',
+    issue: 'Issue',
+    skipped: 'Skipped',
+  };
+  return <span className={`itemStatus ${status}`}>{labels[status]}</span>;
 }
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -1295,25 +2523,42 @@ function NavButton({
   );
 }
 
-function StatusPill({ sessions }: { sessions: VipSession[] }) {
-  const notDone = sessions.reduce(
-    (sum, session) => sum + session.items.filter((item) => !item.majooInputDone && item.usedQty > 0).length,
-    0,
+function StatusPill({ store }: { store: AppStore }) {
+  const todayRuns = store.checklistRuns.filter((run) => run.date === todayISO());
+  const issues = todayRuns.filter((run) => run.status === 'has_issue').length;
+  return <div className={`statusPill ${issues ? 'warn' : ''}`}>{issues ? `${issues} Issue` : `${todayRuns.length} Run`}</div>;
+}
+
+function Toast({ toast }: { toast: ToastMessage | null }) {
+  if (!toast) return null;
+  return (
+    <div className={`toastPopup ${toast.tone}`} role="status" aria-live="polite">
+      <div className="toastIcon">
+        {toast.tone === 'warning' ? <AlertTriangle size={18} /> : <Check size={18} />}
+      </div>
+      <div>
+        <strong>{toast.title}</strong>
+        {toast.body && <span>{toast.body}</span>}
+      </div>
+    </div>
   );
-  return <div className={`statusPill ${notDone ? 'warn' : ''}`}>{notDone ? `${notDone} Majoo` : 'Clear'}</div>;
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="emptyState">
-      <ChevronRight size={22} />
+      <ListChecks size={22} />
       <strong>{title}</strong>
       <span>{body}</span>
     </div>
   );
 }
 
-function getSessionTotals(items: VipSessionItem[]) {
+function setFormValue<K extends keyof VipForm>(setter: React.Dispatch<React.SetStateAction<VipForm>>, key: K, value: VipForm[K]) {
+  setter((current) => ({ ...current, [key]: value }));
+}
+
+function getVipTotals(items: VipSessionItem[]) {
   return items.reduce(
     (sum, item) => ({
       usedQty: sum.usedQty + item.usedQty,
@@ -1324,56 +2569,11 @@ function getSessionTotals(items: VipSessionItem[]) {
   );
 }
 
-function validateForm(form: SessionForm) {
-  const errors: string[] = [];
-  if (!form.date) errors.push('Tanggal wajib diisi.');
-  if (!form.startTime) errors.push('Jam mulai wajib diisi.');
-  if (!form.endTime) errors.push('Jam selesai wajib diisi.');
-  if (form.startTime && form.endTime && form.endTime <= form.startTime) {
-    errors.push('Jam selesai harus lebih besar dari jam mulai.');
-  }
-  if (!form.bookingName.trim()) errors.push('Nama booking wajib diisi.');
-  if (!form.staffName.trim()) errors.push('Staff wajib dipilih.');
-  if (!form.items.length) errors.push('Minimal satu item complimentary.');
-
-  form.items.forEach((line) => {
-    if (!Number.isInteger(line.preparedQty) || !Number.isInteger(line.sealedLeftQty)) {
-      errors.push(`${line.itemName}: qty harus angka bulat.`);
-    }
-    if (line.preparedQty < 0 || line.sealedLeftQty < 0) {
-      errors.push(`${line.itemName}: qty tidak boleh minus.`);
-    }
-    if (line.sealedLeftQty > line.preparedQty) {
-      errors.push(`${line.itemName}: sisa segel melebihi qty disiapkan.`);
-    }
-  });
-
-  return Array.from(new Set(errors));
+function isRunSubmitted(run: ChecklistRun) {
+  return run.status === 'completed' || run.status === 'has_issue';
 }
 
-function setFormValue<K extends keyof SessionForm>(
-  setter: React.Dispatch<React.SetStateAction<SessionForm>>,
-  key: K,
-  value: SessionForm[K],
-) {
-  setter((current) => ({ ...current, [key]: value }));
-}
-
-function filterSessions(sessions: VipSession[], filter: LogFilter, startDate: string, endDate: string) {
-  const today = todayISO();
-  const currentMonth = monthKey(today);
-  return [...sessions]
-    .sort((a, b) => `${b.date}${b.startTime}`.localeCompare(`${a.date}${a.startTime}`))
-    .filter((session) => {
-      if (filter === 'today') return session.date === today;
-      if (filter === 'month') return monthKey(session.date) === currentMonth;
-      if (filter === 'custom') return session.date >= startDate && session.date <= endDate;
-      if (filter === 'notMajoo') return session.items.some((item) => !item.majooInputDone && item.usedQty > 0);
-      return true;
-    });
-}
-
-function buildRecap(sessions: VipSession[]) {
+function buildVipRecap(sessions: VipSession[]) {
   const itemMap = new Map<string, { itemName: string; totalUsed: number; totalCost: number }>();
   let totalUsed = 0;
   let totalCost = 0;
@@ -1411,62 +2611,279 @@ function buildRecap(sessions: VipSession[]) {
   };
 }
 
-function patchItem(items: Item[], setItems: (items: Item[]) => void, itemId: string, patch: Partial<Item>) {
-  setItems(
-    items.map((item) =>
+function getTemplateItems(store: AppStore, templateId: string) {
+  return store.checklistTemplateItems
+    .filter((item) => item.templateId === templateId && item.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function validateVipForm(form: VipForm) {
+  const errors: string[] = [];
+  if (!form.date) errors.push('Tanggal wajib diisi.');
+  if (!form.bookingName.trim()) errors.push('Nama booking wajib diisi.');
+  if (!form.staffName.trim()) errors.push('Staff wajib dipilih.');
+  if (!form.items.length) errors.push('Minimal satu item complimentary.');
+  return errors;
+}
+
+function validateRunItems(items: ChecklistRunItem[]) {
+  const errors: string[] = [];
+  items.forEach((item) => {
+    if (item.status === 'pending') errors.push(`${item.itemName}: belum dikerjakan.`);
+    if (item.status === 'issue' && !item.note.trim()) errors.push(`${item.itemName}: issue wajib catatan.`);
+    if (item.noteRequired && !item.note.trim()) errors.push(`${item.itemName}: wajib catatan.`);
+    if (item.photoRequired && !item.photoUrl && !item.photoDataUrl) errors.push(`${item.itemName}: wajib upload foto.`);
+  });
+  return errors;
+}
+
+function patchVipItem(setStore: (updater: React.SetStateAction<AppStore>) => void, itemId: string, patch: Partial<VipItem>) {
+  setStore((current) => ({
+    ...current,
+    items: current.items.map((item) =>
       item.id === itemId
         ? {
             ...item,
             ...patch,
             hpp: patch.hpp === undefined ? item.hpp : Math.max(0, Number(patch.hpp) || 0),
-            defaultQty:
-              patch.defaultQty === undefined ? item.defaultQty : Math.max(0, Math.trunc(Number(patch.defaultQty) || 0)),
+            defaultQty: patch.defaultQty === undefined ? item.defaultQty : Math.max(0, Math.trunc(Number(patch.defaultQty) || 0)),
           }
         : item,
     ),
+  }));
+}
+
+function deleteVipItem(setStore: (updater: React.SetStateAction<AppStore>) => void, itemId: string, itemName: string) {
+  if (!window.confirm(`Hapus item VIP "${itemName}" dari master data? Riwayat VIP log lama tetap tersimpan.`)) return;
+  setStore((current) => ({
+    ...current,
+    items: current.items.filter((item) => item.id !== itemId),
+  }));
+}
+
+function patchRole(setStore: (updater: React.SetStateAction<AppStore>) => void, roleId: string, patch: Partial<Role>) {
+  setStore((current) => ({
+    ...current,
+    roles: current.roles.map((role) => (role.roleId === roleId ? { ...role, ...patch, updatedAt: nowIso() } : role)),
+  }));
+}
+
+function deleteRole(setStore: (updater: React.SetStateAction<AppStore>) => void, roleId: string, roleName: string) {
+  if (!window.confirm(`Hapus role "${roleName}"? Staff dan template yang memakai role ini akan dikosongkan role-nya.`)) return;
+  setStore((current) => ({
+    ...current,
+    roles: current.roles.filter((role) => role.roleId !== roleId),
+    staff: current.staff.map((person) => (person.roleId === roleId ? { ...person, roleId: '', updatedAt: nowIso() } : person)),
+    checklistTemplates: current.checklistTemplates.map((template) =>
+      template.roleId === roleId ? { ...template, roleId: '', updatedAt: nowIso() } : template,
+    ),
+  }));
+}
+
+function patchStaff(setStore: (updater: React.SetStateAction<AppStore>) => void, staffId: string, patch: Partial<Staff>) {
+  setStore((current) => ({
+    ...current,
+    staff: current.staff.map((person) => (person.staffId === staffId ? { ...person, ...patch, updatedAt: nowIso() } : person)),
+  }));
+}
+
+function deleteStaff(setStore: (updater: React.SetStateAction<AppStore>) => void, staffId: string, staffName: string) {
+  if (!window.confirm(`Hapus staff "${staffName}" dari master data? Riwayat checklist dan VIP log lama tetap tersimpan.`)) return;
+  setStore((current) => ({
+    ...current,
+    staff: current.staff.filter((person) => person.staffId !== staffId),
+  }));
+}
+
+function patchTemplate(setStore: (updater: React.SetStateAction<AppStore>) => void, templateId: string, patch: Partial<ChecklistTemplate>) {
+  setStore((current) => ({
+    ...current,
+    checklistTemplates: current.checklistTemplates.map((template) =>
+      template.templateId === templateId ? { ...template, ...patch, updatedAt: nowIso() } : template,
+    ),
+  }));
+}
+
+function deleteTemplate(setStore: (updater: React.SetStateAction<AppStore>) => void, templateId: string, templateName: string) {
+  if (!window.confirm(`Hapus template "${templateName}" beserta item master di dalamnya? Riwayat checklist yang sudah berjalan tetap tersimpan.`)) return;
+  setStore((current) => ({
+    ...current,
+    checklistTemplates: current.checklistTemplates.filter((template) => template.templateId !== templateId),
+    checklistTemplateItems: current.checklistTemplateItems.filter((item) => item.templateId !== templateId),
+    staff: current.staff.map((person) => ({
+      ...person,
+      openingTemplateId: person.openingTemplateId === templateId ? '' : person.openingTemplateId,
+      closingTemplateId: person.closingTemplateId === templateId ? '' : person.closingTemplateId,
+      updatedAt:
+        person.openingTemplateId === templateId || person.closingTemplateId === templateId ? nowIso() : person.updatedAt,
+    })),
+  }));
+}
+
+function duplicateTemplate(
+  setStore: (updater: React.SetStateAction<AppStore>) => void,
+  store: AppStore,
+  templateId: string,
+) {
+  const source = store.checklistTemplates.find((template) => template.templateId === templateId);
+  if (!source) return '';
+  const timestamp = nowIso();
+  const nextTemplateId = uid();
+  const sourceItems = getTemplateItems(store, templateId);
+
+  setStore((current) => ({
+    ...current,
+    checklistTemplates: [
+      ...current.checklistTemplates,
+      {
+        ...source,
+        templateId: nextTemplateId,
+        templateName: `${source.templateName} Copy`,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ],
+    checklistTemplateItems: [
+      ...current.checklistTemplateItems,
+      ...sourceItems.map((item, index) => ({
+        ...item,
+        templateItemId: uid(),
+        templateId: nextTemplateId,
+        sortOrder: index + 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })),
+    ],
+  }));
+
+  return nextTemplateId;
+}
+
+function patchTemplateItem(setStore: (updater: React.SetStateAction<AppStore>) => void, templateItemId: string, patch: Partial<ChecklistTemplateItem>) {
+  setStore((current) => ({
+    ...current,
+    checklistTemplateItems: current.checklistTemplateItems.map((item) =>
+      item.templateItemId === templateItemId ? { ...item, ...patch, updatedAt: nowIso() } : item,
+    ),
+  }));
+}
+
+function deleteTemplateItem(setStore: (updater: React.SetStateAction<AppStore>) => void, templateItemId: string, itemName: string) {
+  if (!window.confirm(`Hapus item checklist "${itemName}" dari template? Riwayat checklist lama tetap tersimpan.`)) return;
+  setStore((current) => {
+    const deleted = current.checklistTemplateItems.find((item) => item.templateItemId === templateItemId);
+    const remaining = current.checklistTemplateItems.filter((item) => item.templateItemId !== templateItemId);
+    if (!deleted) return current;
+    const reindexed = remaining
+      .filter((item) => item.templateId === deleted.templateId)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((item, index) => ({ ...item, sortOrder: index + 1 }));
+    const reindexMap = new Map(reindexed.map((item) => [item.templateItemId, item]));
+    return {
+      ...current,
+      checklistTemplateItems: remaining.map((item) => reindexMap.get(item.templateItemId) || item),
+    };
+  });
+}
+
+function moveTemplateItem(
+  setStore: (updater: React.SetStateAction<AppStore>) => void,
+  templateId: string,
+  templateItemId: string,
+  direction: -1 | 1,
+) {
+  setStore((current) => {
+    const activeItems = current.checklistTemplateItems
+      .filter((item) => item.templateId === templateId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const index = activeItems.findIndex((item) => item.templateItemId === templateItemId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= activeItems.length) return current;
+    const currentItem = activeItems[index];
+    const swapItem = activeItems[nextIndex];
+    return {
+      ...current,
+      checklistTemplateItems: current.checklistTemplateItems.map((item) => {
+        if (item.templateItemId === currentItem.templateItemId) return { ...item, sortOrder: swapItem.sortOrder, updatedAt: nowIso() };
+        if (item.templateItemId === swapItem.templateItemId) return { ...item, sortOrder: currentItem.sortOrder, updatedAt: nowIso() };
+        return item;
+      }),
+    };
+  });
+}
+
+async function resizeImage(file: File) {
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const maxSize = 1400;
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(image.width * scale);
+  canvas.height = Math.round(image.height * scale);
+  const context = canvas.getContext('2d');
+  if (!context) return dataUrl;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.78);
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Gagal membaca foto.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Gagal memproses foto.'));
+    image.src = src;
+  });
+}
+
+function exportVipCsv(sessions: VipSession[]) {
+  const rows = sessions.flatMap((session) =>
+    session.items.map((item) => ({
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      bookingName: session.bookingName,
+      room: session.room,
+      staffName: session.staffName,
+      itemName: item.itemName,
+      preparedQty: item.preparedQty,
+      sealedLeftQty: item.sealedLeftQty,
+      usedQty: item.usedQty,
+      totalCost: item.totalCost,
+      majooInputDone: item.majooInputDone ? 'Yes' : 'No',
+      notes: session.notes || '',
+    })),
   );
+  exportRows(rows, `vip-complimentary-log-${todayISO()}.csv`);
 }
 
-function patchStaff(staff: Staff[], setStaff: (staff: Staff[]) => void, staffId: string, patch: Partial<Staff>) {
-  setStaff(staff.map((person) => (person.id === staffId ? { ...person, ...patch } : person)));
+function exportChecklistCsv(rows: Record<string, string | number>[]) {
+  exportRows(rows, `checklist-report-${todayISO()}.csv`);
 }
 
-function exportCsv(rows: Record<string, string | number>[]) {
-  const headers = [
-    'date',
-    'startTime',
-    'endTime',
-    'bookingName',
-    'room',
-    'staffName',
-    'itemName',
-    'preparedQty',
-    'sealedLeftQty',
-    'usedQty',
-    'returnToStockQty',
-    'hpp',
-    'totalCost',
-    'majooInputDone',
-    'notes',
-    'createdAt',
-    'updatedAt',
-  ];
-  const csv = [
-    headers.join(','),
-    ...rows.map((row) => headers.map((header) => csvCell(row[header] ?? '')).join(',')),
-  ].join('\n');
+function exportRows(rows: Record<string, string | number>[], filename: string) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(','), ...rows.map((row) => headers.map((header) => csvCell(row[header] ?? '')).join(','))].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `vip-complimentary-log-${todayISO()}.csv`;
+  anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
 }
 
 function csvCell(value: string | number) {
-  const text = String(value).replace(/"/g, '""');
-  return `"${text}"`;
+  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 export default App;
