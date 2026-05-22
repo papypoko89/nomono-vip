@@ -536,6 +536,69 @@ textarea:focus {
   font-weight: 700;
 }
 
+.dashboardHealth {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 14px;
+}
+
+.dashboardHealth.attention {
+  border-color: #c39a4b55;
+  background: var(--gold-soft);
+}
+
+.dashboardHealth.clear {
+  border-color: #00382033;
+  background: var(--green-soft);
+}
+
+.dashboardHealth strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--green);
+  font-size: 22px;
+  line-height: 1.05;
+}
+
+.dashboardHealth p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.liveMini {
+  min-width: 82px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+  text-align: right;
+}
+
+.liveMini.connected {
+  border-color: #00382033;
+  background: #ffffffaa;
+}
+
+.liveMini span {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.liveMini strong {
+  margin-top: 3px;
+  font-size: 13px;
+}
+
 .dashboardList {
   display: grid;
   gap: 8px;
@@ -558,7 +621,7 @@ textarea:focus {
 }
 
 .dashboardIssue {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
 }
 
 .dashboardRow strong,
@@ -577,6 +640,50 @@ textarea:focus {
   font-size: 9.5px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.shiftDashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shiftDashboardCard {
+  min-height: 86px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff80;
+  padding: 12px;
+  text-align: left;
+}
+
+.shiftDashboardCard.done {
+  border-color: #00382033;
+  background: var(--green-soft);
+}
+
+.shiftDashboardCard.notDone {
+  border-color: #c39a4b55;
+  background: var(--gold-soft);
+}
+
+.shiftDashboardCard span,
+.shiftDashboardCard em {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.shiftDashboardCard strong {
+  display: block;
+  margin: 7px 0 5px;
+  color: var(--green);
+  font-size: 20px;
+  line-height: 1;
 }
 
 .itemSummary {
@@ -1743,10 +1850,16 @@ textarea:focus {
   .issueMetaGrid,
   .dashboardRow,
   .dashboardIssue,
+  .dashboardHealth,
+  .shiftDashboardGrid,
   .livePanel,
   .vipRecapToolbar,
   .itemSummary {
     grid-template-columns: 1fr;
+  }
+
+  .liveMini {
+    text-align: left;
   }
 
   .vipRecapHero {

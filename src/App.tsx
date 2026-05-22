@@ -1580,6 +1580,7 @@ function App() {
   );
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeState>(isSupabaseConfigured ? 'idle' : 'disconnected');
   const [lastRealtimeUpdate, setLastRealtimeUpdate] = useState('');
+  const [reportVipTarget, setReportVipTarget] = useState<{ date: string; shift: ShiftNumber } | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [photoViewer, setPhotoViewer] = useState<PhotoViewer | null>(null);
   const skipAutoSyncRef = useRef(false);
@@ -2131,11 +2132,16 @@ function App() {
             realtimeStatus={realtimeStatus}
             lastRealtimeUpdate={lastRealtimeUpdate}
             onOpenIssues={() => setTab('issues')}
-            onOpenReport={() => setTab('report')}
+            onOpenVipRecap={(date, shift) => {
+              setReportVipTarget({ date, shift });
+              setTab('report');
+            }}
           />
         )}
 
-        {tab === 'report' && managerMode && <ReportScreen store={store} onOpenPhoto={setPhotoViewer} onMarkVipMajoo={markVipShiftMajoo} />}
+        {tab === 'report' && managerMode && (
+          <ReportScreen store={store} onOpenPhoto={setPhotoViewer} onMarkVipMajoo={markVipShiftMajoo} vipTarget={reportVipTarget} />
+        )}
 
         {tab === 'issues' && (
           <IssuesScreen
@@ -2733,13 +2739,13 @@ function DashboardScreen({
   realtimeStatus,
   lastRealtimeUpdate,
   onOpenIssues,
-  onOpenReport,
+  onOpenVipRecap,
 }: {
   store: AppStore;
   realtimeStatus: RealtimeState;
   lastRealtimeUpdate: string;
   onOpenIssues: () => void;
-  onOpenReport: () => void;
+  onOpenVipRecap: (date: string, shift: ShiftNumber) => void;
 }) {
   const [date, setDate] = useState(todayISO());
   const activeStaff = store.staff.filter((person) => person.isActive);
@@ -2749,88 +2755,56 @@ function DashboardScreen({
   const openIssues = store.issues
     .filter((issue) => issue.status === 'open' || issue.status === 'in_progress')
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const dayIssues = openIssues.filter((issue) => issue.createdAt.slice(0, 10) === date);
   const vipTotals = getVipTotals(daySessions.flatMap((session) => session.items));
-  const majooPending = store.shifts.filter(
-    (shift) =>
-      daySessions.some((session) => session.shift === shift.shift) &&
-      !store.majooRecaps.some((recap) => recap.date === date && recap.shift === shift.shift && recap.statusMajoo === 'done'),
-  ).length;
-
+  const shiftStatuses = store.shifts.map((shift) => ({
+    ...shift,
+    done: store.majooRecaps.some((recap) => recap.date === date && recap.shift === shift.shift && recap.statusMajoo === 'done'),
+  }));
+  const majooBelum = shiftStatuses.filter((shift) => !shift.done).length;
   const runCount = (type: TemplateType, status: RunStatus) => dayRuns.filter((run) => run.templateType === type && run.status === status).length;
   const runStarted = (type: TemplateType) => new Set(dayRuns.filter((run) => run.templateType === type).map((run) => run.staffId)).size;
-  const progressFor = (run?: ChecklistRun) => {
-    const items = run ? store.checklistRunItems.filter((item) => item.runId === run.runId) : [];
-    const done = items.filter((item) => item.status === 'done' || item.status === 'issue').length;
-    return `${done}/${items.length}`;
-  };
-  const issueCountForStaff = (staff: Staff) => openIssues.filter((issue) => issue.createdByName === staff.staffName).length;
-  const liveLabel =
-    realtimeStatus === 'connected'
-      ? 'Realtime connected'
-      : realtimeStatus === 'idle'
-        ? 'Connecting realtime'
-        : 'Showing latest saved data';
+  const openingPending = Math.max(0, activeStaff.length - runStarted('opening')) + runCount('opening', 'in_progress');
+  const closingPending = Math.max(0, activeStaff.length - runStarted('closing')) + runCount('closing', 'in_progress');
+  const checklistIssue = runCount('opening', 'has_issue') + runCount('closing', 'has_issue');
+  const checklistPending = openingPending + closingPending;
+  const needsAttention = openIssues.length || majooBelum || checklistPending || checklistIssue;
+  const healthLabel = needsAttention ? 'Needs Attention' : 'All Clear';
+  const healthBody = needsAttention
+    ? 'Ada pekerjaan operasional yang perlu dicek hari ini.'
+    : 'Checklist, issue, dan rekap shift terlihat aman.';
+  const liveLabel = realtimeStatus === 'connected' ? 'Live' : realtimeStatus === 'idle' ? 'Connecting' : 'Saved data';
+  const lastUpdateLabel = lastRealtimeUpdate
+    ? new Date(lastRealtimeUpdate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    : '-';
 
   return (
     <section className="stack">
       <ScreenTitle
         title="Dashboard"
-        subtitle="Monitor opening, closing, issue, dan VIP complimentary hari ini."
+        subtitle="Ringkasan operasional harian yang perlu perhatian manager."
         action={<input className="monthInput" type="date" value={date} onChange={(event) => setDate(event.target.value)} />}
       />
 
-      <div className={`panel livePanel ${realtimeStatus === 'connected' ? 'connected' : ''}`}>
+      <div className={`dashboardHealth ${needsAttention ? 'attention' : 'clear'}`}>
         <div>
-          <span className="eyebrow">Live</span>
-          <strong>{liveLabel}</strong>
+          <span className="eyebrow">Operational Health</span>
+          <strong>{healthLabel}</strong>
+          <p>{healthBody}</p>
         </div>
-        <p>{lastRealtimeUpdate ? `Last updated ${new Date(lastRealtimeUpdate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : 'Menunggu update realtime.'}</p>
+        <div className={`liveMini ${realtimeStatus === 'connected' ? 'connected' : ''}`}>
+          <span>{liveLabel}</span>
+          <strong>{lastUpdateLabel}</strong>
+        </div>
       </div>
 
       <div className="sectionHeader">
-        <h2>Today Overview</h2>
+        <h2>Perlu Dicek</h2>
       </div>
       <div className="metricGrid">
-        <Metric label="Opening Done" value={String(runCount('opening', 'completed') + runCount('opening', 'has_issue'))} tone="green" />
-        <Metric label="Opening Run" value={String(runCount('opening', 'in_progress'))} tone="gold" />
-        <Metric label="Opening Belum" value={String(Math.max(0, activeStaff.length - runStarted('opening')))} tone="red" />
-        <Metric label="Opening Issue" value={String(runCount('opening', 'has_issue'))} tone="red" />
-        <Metric label="Closing Done" value={String(runCount('closing', 'completed') + runCount('closing', 'has_issue'))} tone="green" />
-        <Metric label="Closing Run" value={String(runCount('closing', 'in_progress'))} tone="gold" />
-        <Metric label="Closing Belum" value={String(Math.max(0, activeStaff.length - runStarted('closing')))} tone="red" />
-        <Metric label="Closing Issue" value={String(runCount('closing', 'has_issue'))} tone="red" />
-      </div>
-
-      <div className="sectionHeader">
-        <h2>Staff Progress</h2>
-      </div>
-      <div className="dashboardList">
-        {activeStaff.map((staff) => {
-          const role = store.roles.find((item) => item.roleId === staff.roleId);
-          const opening = dayRuns.find((run) => run.staffId === staff.staffId && run.templateType === 'opening');
-          const closing = dayRuns.find((run) => run.staffId === staff.staffId && run.templateType === 'closing');
-          return (
-            <article className="dashboardRow" key={staff.staffId}>
-              <div>
-                <strong>{staff.staffName}</strong>
-                <span>{role?.roleName || 'Role belum diset'}</span>
-              </div>
-              <div>
-                <span>Opening</span>
-                <strong>{opening ? progressFor(opening) : 'Not Started'}</strong>
-              </div>
-              <div>
-                <span>Closing</span>
-                <strong>{closing ? progressFor(closing) : 'Not Started'}</strong>
-              </div>
-              <div>
-                <span>Open Issue</span>
-                <strong className={issueCountForStaff(staff) ? 'dangerText' : ''}>{issueCountForStaff(staff)}</strong>
-              </div>
-            </article>
-          );
-        })}
+        <Metric label="Open Issue" value={String(openIssues.length)} tone={openIssues.length ? 'red' : 'green'} />
+        <Metric label="Majoo Belum" value={String(majooBelum)} tone={majooBelum ? 'red' : 'green'} />
+        <Metric label="Checklist Belum" value={String(checklistPending)} tone={checklistPending ? 'red' : 'green'} />
+        <Metric label="VIP Session" value={String(daySessions.length)} tone="green" />
       </div>
 
       <div className="sectionHeader">
@@ -2839,16 +2813,9 @@ function DashboardScreen({
           <MessageSquare size={15} /> Issues
         </button>
       </div>
-      <div className="metricGrid">
-        <Metric label="Open Today" value={String(dayIssues.length)} tone="red" />
-        <Metric label="Urgent" value={String(openIssues.filter((issue) => issue.priority === 'urgent').length)} tone="red" />
-        <Metric label="High" value={String(openIssues.filter((issue) => issue.priority === 'high').length)} tone="gold" />
-        <Metric label="Medium" value={String(openIssues.filter((issue) => issue.priority === 'medium').length)} tone="gold" />
-      </div>
       <div className="dashboardList">
         {openIssues.slice(0, 4).map((issue) => (
           <button className="dashboardIssue" key={issue.issueId} onClick={onOpenIssues}>
-            <PriorityBadge priority={issue.priority} />
             <strong>{issue.title}</strong>
             <span>{issue.createdByName || '-'} - {issue.area || '-'}</span>
           </button>
@@ -2857,8 +2824,21 @@ function DashboardScreen({
       </div>
 
       <div className="sectionHeader">
+        <h2>Shift Majoo</h2>
+      </div>
+      <div className="shiftDashboardGrid">
+        {shiftStatuses.map((shift) => (
+          <button className={`shiftDashboardCard ${shift.done ? 'done' : 'notDone'}`} key={shift.shift} onClick={() => onOpenVipRecap(date, shift.shift)}>
+            <span>{shift.label}</span>
+            <strong>{shift.done ? 'Done' : 'Belum'}</strong>
+            <em>{shift.startTime}-{shift.endTime}</em>
+          </button>
+        ))}
+      </div>
+
+      <div className="sectionHeader">
         <h2>VIP Complimentary</h2>
-        <button className="secondaryBtn" onClick={onOpenReport}>
+        <button className="secondaryBtn" onClick={() => onOpenVipRecap(date, shiftForCheckoutTime(store.shifts, timeNow()))}>
           <FileText size={15} /> Report
         </button>
       </div>
@@ -2866,10 +2846,18 @@ function DashboardScreen({
         <Metric label="VIP Sessions" value={String(daySessions.length)} tone="green" />
         <Metric label="Item Terpakai" value={String(vipTotals.usedQty)} tone="green" />
         <Metric label="Est. Cost" value={rupiah(vipTotals.totalCost)} tone="gold" />
-        <Metric label="Shift Pending Majoo" value={String(majooPending)} tone="red" />
+        <Metric label="Majoo Belum" value={String(majooBelum)} tone={majooBelum ? 'red' : 'green'} />
       </div>
 
-      <p className="syncStatus muted">{dayItems.length} checklist item tercatat pada tanggal ini.</p>
+      <div className="sectionHeader">
+        <h2>Checklist Today</h2>
+      </div>
+      <div className="metricGrid">
+        <Metric label="Opening Belum" value={String(openingPending)} tone={openingPending ? 'red' : 'green'} />
+        <Metric label="Closing Belum" value={String(closingPending)} tone={closingPending ? 'red' : 'green'} />
+        <Metric label="Checklist Issue" value={String(checklistIssue)} tone={checklistIssue ? 'red' : 'green'} />
+        <Metric label="Checklist Item" value={String(dayItems.length)} tone="green" />
+      </div>
     </section>
   );
 }
@@ -2878,10 +2866,12 @@ function ReportScreen({
   store,
   onOpenPhoto,
   onMarkVipMajoo,
+  vipTarget,
 }: {
   store: AppStore;
   onOpenPhoto: (photo: PhotoViewer) => void;
   onMarkVipMajoo: (date: string, shift: ShiftNumber, cashierStaffId: string) => void;
+  vipTarget: { date: string; shift: ShiftNumber } | null;
 }) {
   const [reportMode, setReportMode] = useState<'checklist' | 'vip'>('checklist');
   const [date, setDate] = useState(todayISO());
@@ -2889,6 +2879,13 @@ function ReportScreen({
   const [staffId, setStaffId] = useState('all');
   const [templateType, setTemplateType] = useState<'all' | TemplateType>('all');
   const [status, setStatus] = useState<'all' | RunStatus>('all');
+
+  useEffect(() => {
+    if (!vipTarget) return;
+    setReportMode('vip');
+    setDate(vipTarget.date);
+    setSelectedShift(vipTarget.shift);
+  }, [vipTarget]);
 
   const filteredRuns = useMemo(
     () =>
@@ -3074,15 +3071,14 @@ function IssuesScreen({
   onAddComment: (issueId: string, comment: string) => void;
   onOpenPhoto: (photo: PhotoViewer) => void;
 }) {
-  const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('open');
-  const [priority, setPriority] = useState<'all' | 'critical' | IssuePriority>('all');
+  const [status, setStatus] = useState<'all' | 'open'>('open');
   const [date, setDate] = useState(todayISO());
   const [staffName, setStaffName] = useState('all');
   const [openIssueId, setOpenIssueId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const isManagerView = canManageIssues;
 
-  const visibleIssues = useMemo(() => store.issues.filter((issue) => issue.status !== 'closed'), [store.issues]);
+  const visibleIssues = useMemo(() => store.issues.filter((issue) => issue.status !== 'closed' && issue.status !== 'resolved'), [store.issues]);
   const filteredIssues = useMemo(
     () =>
       visibleIssues
@@ -3090,39 +3086,24 @@ function IssuesScreen({
           const currentStatus = issue.status === 'in_progress' ? 'open' : issue.status;
           return status === 'all' ? true : currentStatus === status;
         })
-        .filter((issue) =>
-          priority === 'all' ? true : priority === 'critical' ? issue.priority === 'urgent' || issue.priority === 'high' : issue.priority === priority,
-        )
         .filter((issue) => issue.createdAt.slice(0, 10) === date)
         .filter((issue) => (staffName === 'all' ? true : issue.createdByName === staffName))
         .filter((issue) => (isManagerView ? true : issue.createdByName === selectedStaff?.staffName))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [date, isManagerView, priority, selectedStaff?.staffName, staffName, status, visibleIssues],
+    [date, isManagerView, selectedStaff?.staffName, staffName, status, visibleIssues],
   );
 
   const openIssues = visibleIssues.filter((issue) => issue.status === 'open' || issue.status === 'in_progress');
-  const resolvedIssues = visibleIssues.filter((issue) => issue.status === 'resolved');
+  const todayIssues = visibleIssues.filter((issue) => issue.createdAt.slice(0, 10) === todayISO());
 
-  const quickFilter = (mode: 'open' | 'high' | 'today' | 'resolved') => {
+  const quickFilter = (mode: 'open' | 'today') => {
     setOpenIssueId('');
     if (mode === 'open') {
       setStatus('open');
-      setPriority('all');
-      setDate(todayISO());
-    }
-    if (mode === 'high') {
-      setStatus('open');
-      setPriority('critical');
       setDate(todayISO());
     }
     if (mode === 'today') {
       setStatus('all');
-      setPriority('all');
-      setDate(todayISO());
-    }
-    if (mode === 'resolved') {
-      setStatus('resolved');
-      setPriority('all');
       setDate(todayISO());
     }
   };
@@ -3142,23 +3123,17 @@ function IssuesScreen({
 
       <div className="metricGrid">
         <Metric label="Open" value={String(openIssues.length)} tone="red" />
-        <Metric label="Resolved" value={String(resolvedIssues.length)} tone="green" />
-        <Metric label="Urgent" value={String(openIssues.filter((issue) => issue.priority === 'urgent').length)} tone="red" />
-        <Metric label="High" value={String(openIssues.filter((issue) => issue.priority === 'high').length)} tone="gold" />
+        <Metric label="Hari Ini" value={String(todayIssues.length)} tone="gold" />
+        <Metric label="Checklist" value={String(openIssues.filter((issue) => issue.source === 'checklist').length)} tone="green" />
+        <Metric label="Manual" value={String(openIssues.filter((issue) => issue.source === 'manual').length)} tone="green" />
       </div>
 
       <div className="filterBar">
-        <button className={status === 'open' && priority === 'all' ? 'active' : ''} onClick={() => quickFilter('open')}>
+        <button className={status === 'open' ? 'active' : ''} onClick={() => quickFilter('open')}>
           Open Issues
         </button>
-        <button className={priority === 'critical' ? 'active' : ''} onClick={() => quickFilter('high')}>
-          Urgent / High
-        </button>
-        <button className={status === 'all' && priority === 'all' && date === todayISO() ? 'active' : ''} onClick={() => quickFilter('today')}>
+        <button className={status === 'all' && date === todayISO() ? 'active' : ''} onClick={() => quickFilter('today')}>
           Today
-        </button>
-        <button className={status === 'resolved' ? 'active' : ''} onClick={() => quickFilter('resolved')}>
-          Resolved
         </button>
       </div>
 
@@ -3170,23 +3145,12 @@ function IssuesScreen({
           <select
             value={status}
             onChange={(event) => {
-              setStatus(event.target.value as 'all' | 'open' | 'resolved');
+              setStatus(event.target.value as 'all' | 'open');
               setOpenIssueId('');
             }}
           >
             <option value="all">Semua</option>
             <option value="open">Open</option>
-            <option value="resolved">Resolved</option>
-          </select>
-        </Field>
-        <Field label="Priority">
-          <select value={priority} onChange={(event) => setPriority(event.target.value as 'all' | 'critical' | IssuePriority)}>
-            <option value="all">Semua</option>
-            <option value="critical">Urgent / High</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
           </select>
         </Field>
         <Field label="Staff">
@@ -3211,7 +3175,6 @@ function IssuesScreen({
             <article className={expanded ? 'issueAccordion active' : 'issueAccordion'} key={issue.issueId}>
               <button className="issueAccordionSummary" onClick={() => setOpenIssueId(expanded ? '' : issue.issueId)}>
                 <div className="issueListHead">
-                  <PriorityBadge priority={issue.priority} />
                   <IssueStatusBadge status={issue.status === 'in_progress' ? 'open' : issue.status} />
                 </div>
                 <strong>{issue.title}</strong>
@@ -3223,10 +3186,6 @@ function IssuesScreen({
               {expanded && (
                 <div className="issueAccordionBody">
                   <div className="issueMetaGrid">
-                    <div>
-                      <span>Priority</span>
-                      <strong>{issuePriorityLabel(issue.priority)}</strong>
-                    </div>
                     <div>
                       <span>Area</span>
                       <strong>{issue.area || '-'}</strong>
@@ -3268,14 +3227,6 @@ function IssuesScreen({
 
                   {isManagerView && (
                     <div className="issueControls">
-                      <Field label="Priority">
-                        <select value={issue.priority} onChange={(event) => onUpdateIssue(issue.issueId, { priority: event.target.value as IssuePriority })}>
-                          <option value="urgent">Urgent</option>
-                          <option value="high">High</option>
-                          <option value="medium">Medium</option>
-                          <option value="low">Low</option>
-                        </select>
-                      </Field>
                       <Field label="Assign">
                         <select value={issue.assignedToName} onChange={(event) => onUpdateIssue(issue.issueId, { assignedToName: event.target.value })}>
                           <option value="">Belum assign</option>
@@ -3285,14 +3236,12 @@ function IssuesScreen({
                               <option value={person.staffName} key={person.staffId}>
                                 {person.staffName}
                               </option>
-                            ))}
+                          ))}
                         </select>
                       </Field>
-                      {issue.status !== 'resolved' && (
-                        <button className="primaryBtn" onClick={() => onUpdateIssue(issue.issueId, { status: 'resolved' })}>
-                          <Check size={16} /> Resolve Issue
-                        </button>
-                      )}
+                      <button className="primaryBtn" onClick={() => onUpdateIssue(issue.issueId, { status: 'closed' })}>
+                        <Check size={16} /> Selesai
+                      </button>
                     </div>
                   )}
 
@@ -3351,11 +3300,10 @@ function VipRecapPanel({
   const isMajooDone = majooRecap?.statusMajoo === 'done';
   const statusRows = store.shifts.map((item) => {
     const done = store.majooRecaps.some((recapItem) => recapItem.date === date && recapItem.shift === item.shift && recapItem.statusMajoo === 'done');
-    const hasSessions = store.sessions.some((session) => session.date === date && session.shift === item.shift);
     return {
       shift: item.shift,
       label: item.label,
-      status: done ? 'done' : hasSessions ? 'pending' : 'empty',
+      status: done ? 'done' : 'empty',
     };
   });
 
@@ -3367,7 +3315,7 @@ function VipRecapPanel({
           <strong>Shift {shift} - {niceDate(date)}</strong>
           <p>{shiftLabel(store.shifts, shift)}</p>
         </div>
-        <span className={`majooBadge ${isMajooDone ? 'done' : 'pending'}`}>{isMajooDone ? 'Majoo Done' : 'Majoo Pending'}</span>
+        <span className={`majooBadge ${isMajooDone ? 'done' : 'pending'}`}>{isMajooDone ? 'Majoo Done' : 'Majoo Belum'}</span>
       </div>
 
       <div className="vipRecapToolbar">
@@ -3391,7 +3339,7 @@ function VipRecapPanel({
         <Metric label="Sesi Selesai" value={recap.sessionCount.toLocaleString('id-ID')} tone="green" />
         <Metric label="Total Biaya" value={rupiah(recap.totalCost)} tone="gold" />
         <Metric label="Qty Terpakai" value={recap.totalUsed.toLocaleString('id-ID')} tone="green" />
-        <Metric label="Status Majoo" value={majooRecap?.statusMajoo === 'done' ? 'Done' : 'Pending'} tone={majooRecap?.statusMajoo === 'done' ? 'green' : 'red'} />
+        <Metric label="Status Majoo" value={majooRecap?.statusMajoo === 'done' ? 'Done' : 'Belum'} tone={majooRecap?.statusMajoo === 'done' ? 'green' : 'red'} />
       </div>
 
       <div className="majooCard">
@@ -3403,7 +3351,7 @@ function VipRecapPanel({
         <div className="shiftStatusGroup" aria-label="Status shift hari ini">
           {statusRows.map((row) => (
             <span className={`shiftStatusChip ${row.status}`} key={row.shift}>
-              {row.label.replace('Shift ', 'S')} <strong>{row.status === 'done' ? 'Done' : row.status === 'pending' ? 'Pending' : 'Belum'}</strong>
+              {row.label.replace('Shift ', 'S')} <strong>{row.status === 'done' ? 'Done' : 'Belum'}</strong>
             </span>
           ))}
         </div>
