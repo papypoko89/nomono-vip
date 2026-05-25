@@ -2215,7 +2215,7 @@ function VipLogScreen({
       shift: shiftForCheckoutTime(store.shifts, endTime),
     }));
   };
-  const updateCashier = (staffId: string) => {
+  const updateRunner = (staffId: string) => {
     const person = activeStaff.find((item) => item.staffId === staffId);
     setForm((current) => ({ ...current, cashierStaffId: staffId, staffName: person?.staffName || '' }));
   };
@@ -2244,7 +2244,7 @@ function VipLogScreen({
     <section className="stack">
       <ScreenTitle
         title={editing ? 'Edit VIP Log' : 'VIP Complimentary Log'}
-        subtitle="Input saat checkout: par, sisa segel, dan top-up otomatis."
+        subtitle="Runner cek saat checkout, lalu update qty complimentary di ruang VIP."
         action={
           editing ? (
             <button className="secondaryBtn" onClick={onReset}>
@@ -2273,9 +2273,9 @@ function VipLogScreen({
         <Field label="Selesai">
           <input type="time" value={form.endTime} onChange={(event) => updateCheckoutTime(event.target.value)} />
         </Field>
-        <Field label="Kasir">
-          <select value={form.cashierStaffId} onChange={(event) => updateCashier(event.target.value)}>
-            <option value="">Pilih kasir</option>
+        <Field label="Runner">
+          <select value={form.cashierStaffId} onChange={(event) => updateRunner(event.target.value)}>
+            <option value="">Pilih runner</option>
             {activeStaff.map((person) => (
               <option value={person.staffId} key={person.staffId}>
                 {person.staffName}
@@ -3295,8 +3295,8 @@ function VipRecapPanel({
   const shiftSessions = useMemo(() => store.sessions.filter((session) => session.date === date && session.shift === shift), [date, shift, store.sessions]);
   const recap = useMemo(() => buildVipRecap(shiftSessions), [shiftSessions]);
   const majooRecap = store.majooRecaps.find((item) => item.date === date && item.shift === shift);
-  const cashierStaffId = shiftSessions[0]?.cashierStaffId || store.staff.find((person) => person.isActive)?.staffId || '';
-  const cashier = store.staff.find((person) => person.staffId === cashierStaffId);
+  const runnerStaffId = shiftSessions[0]?.cashierStaffId || store.staff.find((person) => person.isActive)?.staffId || '';
+  const runner = store.staff.find((person) => person.staffId === runnerStaffId);
   const isMajooDone = majooRecap?.statusMajoo === 'done';
   const statusRows = store.shifts.map((item) => {
     const done = store.majooRecaps.some((recapItem) => recapItem.date === date && recapItem.shift === item.shift && recapItem.statusMajoo === 'done');
@@ -3328,9 +3328,9 @@ function VipRecapPanel({
             ))}
           </select>
         </Field>
-        <div className="cashierStrip">
-          <span>Kasir</span>
-          <strong>{cashier?.staffName || shiftSessions[0]?.staffName || '-'}</strong>
+        <div className="runnerStrip">
+          <span>Runner</span>
+          <strong>{runner?.staffName || shiftSessions[0]?.staffName || '-'}</strong>
           <em>{shiftSessions.length} sesi</em>
         </div>
       </div>
@@ -3380,7 +3380,7 @@ function VipRecapPanel({
       <div className="stickyActions">
         <button
           className="primaryBtn"
-          onClick={() => onMarkMajoo(date, shift, cashierStaffId)}
+          onClick={() => onMarkMajoo(date, shift, runnerStaffId)}
           disabled={!shiftSessions.length || majooRecap?.statusMajoo === 'done'}
         >
           <Check size={16} /> {majooRecap?.statusMajoo === 'done' ? 'Sudah input Majoo' : 'Tandai sudah input Majoo'}
@@ -4287,7 +4287,7 @@ function validateVipForm(form: VipForm) {
   const errors: string[] = [];
   if (!form.date) errors.push('Tanggal wajib diisi.');
   if (!form.bookingName.trim()) errors.push('Nama booking wajib diisi.');
-  if (!form.cashierStaffId && !form.staffName.trim()) errors.push('Kasir wajib dipilih.');
+  if (!form.cashierStaffId && !form.staffName.trim()) errors.push('Runner wajib dipilih.');
   if (!form.items.length) errors.push('Minimal satu item complimentary.');
   const seen = new Set<string>();
   form.items.forEach((item) => {
@@ -4541,7 +4541,7 @@ function exportVipCsv(sessions: VipSession[], includeFinancials = false) {
       startTime: session.startTime,
       endTime: session.endTime,
       bookingName: session.bookingName,
-      cashierName: session.staffName,
+      runnerName: session.staffName,
       itemName: item.itemName,
       par: item.preparedQty,
       sealedLeftQty: item.sealedLeftQty,
